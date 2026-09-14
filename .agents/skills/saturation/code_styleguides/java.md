@@ -78,10 +78,14 @@ and continue only when doing so is safe.
 ### While editing
 
 1. Preserve behavior unless the task explicitly requests a behavior change.
-2. Apply this guide to new and modified lines.
+2. Apply this guide and the structural design rules in `general.md` to all
+   new and modified code.
 3. Keep overloads, related members, and public documentation coherent.
 4. Prefer a clear local variable or extracted method over clever wrapping.
+   See Section 5 "Structural design" for concrete extraction signals.
 5. Keep comments focused on intent, constraints, or non-obvious behavior.
+6. Check structural health: class size, method size, coupling count, and
+   encapsulation against the thresholds in `general.md`.
 
 ### After editing
 
@@ -205,6 +209,80 @@ and continue only when doing so is safe.
 -   **MUST** qualify static members with their declaring class, for example
     `Foo.aStaticMethod()`, not `aFoo.aStaticMethod()`.
 -   **MUST NOT** override `Object.finalize`.
+
+### Structural design (Java)
+
+These rules complement the cross-language structural rules in `general.md`
+with Java-specific extraction signals and patterns.
+
+#### Method extraction signals
+
+-   **SHOULD** extract a private method when a code block requires an inline
+    comment to explain *what* it does. The method name replaces the comment.
+-   **SHOULD** extract when a method contains a stream pipeline or loop that
+    encodes a business rule. Name the extracted method after the business
+    concept, not the mechanical operation.
+-   **SHOULD** treat a private method longer than approximately 15 lines as a
+    signal that it may be doing more than one thing. Consider whether part of
+    the logic belongs in a domain class.
+
+Preferred — extract named business logic:
+
+```java
+// Before: business rule hidden inside a stream pipeline in a controller
+boolean hasValidated = steps.stream()
+    .anyMatch(s -> s.getValidationStatus() == VALIDATED);
+
+// After: extracted to a domain method with a semantic name
+boolean hasValidated = funnelSteps.hasAnyValidated();
+```
+
+#### Controller responsibility
+
+-   **SHOULD** keep controllers and entry-point classes thin. A controller
+    orchestrates — it receives input, delegates to domain or service objects,
+    and returns output. It should not contain domain logic, complex
+    conditionals, or collection operations.
+-   **SHOULD** move decision logic that reads multiple properties of a domain
+    object into that domain object. See `general.md` Section 3 (Feature
+    Envy).
+
+Preferred — thin controller:
+
+```java
+@PostMapping("/orders/{id}/ship")
+ResponseEntity<Void> ship(@PathVariable Long id) {
+  Order order = orders.findOrFail(id);
+  shipmentService.shipIfReady(order);     // domain decides readiness
+  return ResponseEntity.accepted().build();
+}
+```
+
+Avoid — controller containing domain logic:
+
+```java
+@PostMapping("/orders/{id}/ship")
+ResponseEntity<Void> ship(@PathVariable Long id) {
+  Order order = orders.findOrFail(id);
+  // Feature Envy: controller reads order internals to decide
+  if (order.getStatus() == VALIDATED
+      && order.getPayment().isConfirmed()
+      && order.getItems().stream().allMatch(Item::isAvailable)) {
+    shipmentService.ship(order);
+  }
+  return ResponseEntity.accepted().build();
+}
+```
+
+#### Complex private methods
+
+-   **SHOULD** treat an accumulation of private methods with Maps, nested
+    conditionals, or multi-step transformations as a design signal, not just
+    a size signal. It often means a missing domain abstraction.
+-   When multiple private methods in the same class operate on the same data
+    structure (e.g. building a `Map`, filtering it, reducing it), **SHOULD**
+    extract a First-Class Collection or domain class that encapsulates those
+    operations. See `general.md` Section 4.
 
 ## 6. Naming Rules
 
@@ -338,6 +416,10 @@ Before reporting completion, verify the following:
     the applicable rules.
 -   Names distinguish constants from ordinary fields and variables.
 -   Visible APIs have useful Javadoc.
+-   Structural design checks from `general.md` pass: class size, method size,
+    coupling count, Feature Envy, First-Class Collections, and duplication.
+-   Controllers are thin and do not contain domain logic (Section 5,
+    "Controller responsibility").
 -   The configured formatter, linter, compiler, and relevant tests were run, or
     each unavailable/skipped check is explicitly reported.
 -   The final diff contains no unrelated reformatting or generated artifacts.
