@@ -5,8 +5,7 @@ description: "Orquestrar uma implementação por meio de subagentes a partir do 
 
 Ao iniciar `/saturation`, consolide o contexto ativo e `code_styleguides/SKILL.md`
 em `.saturation/context.md`, registrando objetivo, escopo, qualidade, restrições,
-decisões, princípios e critérios de verificação. Execute `/s-init` e confirme o
-ambiente pronto antes da primeira delegação. Congele o contexto antes de delegar
+decisões, princípios e critérios de verificação. Congele o contexto antes de delegar
 e mantenha-o como fonte única durante todo o run; mudanças de intenção, escopo,
 qualidade ou restrições exigem decisão explícita do usuário.
 

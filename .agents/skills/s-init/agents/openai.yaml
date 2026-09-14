@@ -1,4 +1,0 @@
-interface:
-  display_name: "S-init"
-  short_description: "Prepare the subagent runtime"
-  default_prompt: "Use $s-init to verify that this repository is ready for fresh subagent sessions."
