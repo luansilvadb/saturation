@@ -3,19 +3,17 @@ name: saturation
 description: "Orchestrate implementation through subagents from the current session context. Use when the user invokes /saturation to implement, review, and repair a task while preserving its intent and scope."
 ---
 
-Language policy: this skill is English-only. Write all human-readable
-instructions, handoffs, reports, and other artifacts in English. Preserve
-machine-readable contract keys, identifiers, enum values, and paths exactly as
-defined.
+Write operational prompts, handoffs, reports, and artifacts in English.
+Preserve machine-readable contract keys, identifiers, enum values, and paths
+exactly as defined.
 
 When `/saturation` starts, the orchestrator reads
 `code_styleguides/prompting.md`, `code_styleguides/general.md`, the applicable
-language modules, and the active context. There is no
-`code_styleguides/SKILL.md`. Record the objective, scope, quality, constraints,
-decisions, principles, and verification criteria in `.saturation/context.md`,
-and freeze it before the first handoff. Use this file as the single source of
-truth and do not write to it after the freeze; changes to intent, scope,
-quality, or constraints require an explicit user decision.
+language modules, and the active context. Record the objective, scope, quality,
+constraints, decisions, principles, and verification criteria in
+`.saturation/context.md`, and freeze it before the first handoff. Use this file
+as the single source of truth and do not write to it after the freeze; changes
+to intent, scope, quality, or constraints require an explicit user decision.
 
 Before every operational dispatch, compose a prompt with the canonical
 headings and adaptive strategy in `code_styleguides/prompting.md`. Read
@@ -39,8 +37,7 @@ every event or tool-call read belongs to the declared assignment's
 read-root policy, but that fixture boundary does not restrict product work.
 All product writes use a fresh session and remain within `write_scope`;
 promotion has its own assignment. Each handoff is a validatable JSON payload,
-never loose prose, with the existing `context`,
-`assignment`, `state`, `evidence`, and `fresh_session` fields, plus:
+never loose prose, with:
 
 - `context`: `{ "path": ".saturation/context.md", "frozen": true }`;
 - `assignment`: `{ "id": string, "owner_actor_id": string, "read_scope": string[], "write_scope": string[] }`, with fields exactly matching the declaration and registered assignment;
@@ -54,17 +51,17 @@ never loose prose, with the existing `context`,
 
 The handoff envelope does not carry `tool_call_ref`; its `output.event_ref` and
 the target action's `handoff_ref` establish the handoff link. Target action
-payloads and tool calls carry the observable `tool_call_ref`.
+payloads and tool calls carry `tool_call_ref`; for target actions, it resolves
+to a tool call by the same actor and phase.
 
 For a `complete` return, `error` and `stop` are null and `unresolved_risks` is
 empty; `needs_repair` keeps `error` and `stop` null and lists the risks;
 `blocked` requires a typed `error`, unresolved risks, and
 `stop.required: true`. Every event and tool call records a unique ID, actor,
-session, phase, `reads`, and `writes`; target action payloads carry
-`tool_call_ref`, which resolves to a tool call by the same actor and phase.
-Each `evidence.source_id` resolves to an event or call, with observable
-`paths` in `reads`/`writes`. Decisions and state transitions also point to
-evidence; do not accept state, decision, or claim without a link.
+session, phase, `reads`, and `writes`. Each `evidence.source_id` resolves to an
+event or call, with observable `paths` in `reads`/`writes`. Decisions and state
+transitions also point to evidence; do not accept state, decision, or claim
+without a link.
 
 After each implementation, a fresh, adversarial, read-only reviewer reads the
 candidate, every dispatched prompt relevant to it, and its evidence, records
