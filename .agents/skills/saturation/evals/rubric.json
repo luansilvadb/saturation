@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "score_max": 100,
+  "acceptance": {
+    "decision": "ACCEPT",
+    "score": 100,
+    "grade": "A"
+  },
+  "criteria": [
+    {"id": "context_freeze", "points": 10, "checks": ["exactly_one_context_frozen", "orchestrator_reads_frozen_context_before_handoff", "freeze_payload_is_immutable"]},
+    {"id": "tool_order", "points": 10, "checks": ["freeze_before_inspect_and_implement", "inspect_before_implement", "review_repair_verify_review_promote_order"]},
+    {"id": "session_freshness", "points": 10, "checks": ["role_sessions_are_distinct", "handoffs_mark_fresh_session", "events_use_expected_roles"]},
+    {"id": "write_scope", "points": 10, "checks": ["writes_stay_in_allowed_root", "assignment_scope_is_respected", "reviewer_and_verifier_do_not_write"]},
+    {"id": "handoff_payload", "points": 10, "checks": ["handoff_carries_context", "handoff_carries_assignment_and_state", "handoff_carries_evidence_and_freshness"]},
+    {"id": "readonly_review", "points": 10, "checks": ["review_is_read_only", "review_is_adversarial", "reviewer_is_independent"]},
+    {"id": "evidence", "points": 10, "checks": ["evidence_records_are_valid", "events_link_evidence", "claims_link_to_observable_sources"]},
+    {"id": "repair_reverify", "points": 10, "checks": ["repair_follows_reported_gaps", "verification_rechecks_gaps", "verification_passes_after_repair"]},
+    {"id": "completion_gates", "points": 10, "checks": ["terminal_completion_gate_exists", "gate_requires_review_verification_promotion", "gate_has_no_unresolved_blocker"]},
+    {"id": "escalation", "points": 10, "checks": ["risks_are_declared", "required_risks_are_escalated", "escalations_have_resolution_evidence"]}
+  ],
+  "regression_matrix": [
+    {"trace": "complete.json", "decision": "ACCEPT", "score": 100, "grade": "A", "failed_criteria": []},
+    {"trace": "incomplete_handoff.json", "decision": "REJECT", "criteria": ["handoff_payload"]},
+    {"trace": "missing_freeze.json", "decision": "REJECT", "criteria": ["context_freeze"]},
+    {"trace": "missing_reverify.json", "decision": "REJECT", "criteria": ["repair_reverify"]},
+    {"trace": "out_of_scope_write.json", "decision": "REJECT", "criteria": ["write_scope"]},
+    {"trace": "premature_completion.json", "decision": "REJECT", "criteria": ["completion_gates"]},
+    {"trace": "reviewer_not_readonly.json", "decision": "REJECT", "criteria": ["write_scope", "readonly_review"]},
+    {"trace": "wrong_tool_order.json", "decision": "REJECT", "criteria": ["tool_order"]}
+  ]
+}
