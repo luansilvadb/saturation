@@ -21,6 +21,35 @@ Saturation is a Codex skill for orchestrating implementation work through fresh,
 
 Scope changes, conflicts, real-world effects, and unresolved blockers must be escalated instead of being silently absorbed.
 
+## At a glance
+
+The frozen context and style guide feed the orchestration rules. Work then moves through fresh implementation, review, repair, verification, and promotion sessions. The evaluation suite grades the observable trace of that workflow.
+
+```mermaid
+flowchart TD
+    C[".saturation/context.md<br/>Frozen run context"] --> S["SKILL.md<br/>Orchestration rules"]
+    G["code_styleguides/SKILL.md"] --> S
+    M["agents/openai.yaml<br/>Metadata and default prompt"] --> S
+
+    S --> F["Freeze context"]
+    F --> A["Disjoint assignments"]
+    A --> I["Fresh implementation sessions"]
+    I --> R["Fresh adversarial read-only review"]
+    R --> P{"Material gaps?"}
+    P -- "Yes" --> X["Repair"]
+    X --> V["Fresh independent verification"]
+    P -- "No" --> V
+    V --> Q{"All gates pass?"}
+    Q -- "No" --> X
+    Q -- "Yes" --> PR["Final review"]
+    PR --> PM["Promote"]
+
+    E["evals/report.py"] --> GR["evals/grader.py"]
+    T["evals/test_grader.py"] --> GR
+    TR["evals/traces/*.json"] --> GR
+    RB["evals/rubric.json"] --> GR
+```
+
 ## Repository layout
 
 ```text
