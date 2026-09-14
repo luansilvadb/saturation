@@ -118,16 +118,16 @@ EVIDENCE_SOURCE_KINDS = {
 }
 
 CRITERIA = (
-    ("context_freeze", "contexto congelado antes da delegação"),
-    ("tool_order", "ordem dos tool calls"),
-    ("session_freshness", "identidade e frescor das sessões"),
-    ("write_scope", "escopos de escrita e promoção"),
-    ("handoff_payload", "payload completo de handoff"),
-    ("readonly_review", "revisão independente, adversarial e read-only"),
-    ("evidence", "evidências ligadas a ações observáveis"),
-    ("repair_reverify", "reparo e reverificação"),
-    ("completion_gates", "gates de conclusão"),
-    ("escalation", "escalada de conflitos e bloqueios"),
+    ("context_freeze", "frozen context before delegation"),
+    ("tool_order", "tool-call order"),
+    ("session_freshness", "session identity and freshness"),
+    ("write_scope", "write scopes and promotion"),
+    ("handoff_payload", "complete handoff payload"),
+    ("readonly_review", "independent, adversarial, read-only review"),
+    ("evidence", "evidence linked to observable actions"),
+    ("repair_reverify", "repair and reverification"),
+    ("completion_gates", "completion gates"),
+    ("escalation", "conflict and blocker escalation"),
 )
 
 

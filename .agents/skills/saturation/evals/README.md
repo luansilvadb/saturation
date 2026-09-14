@@ -2,6 +2,27 @@
 
 These deterministic, standard-library-only evals grade synthetic workflow traces for the `saturation` skill: frozen context, fresh handoffs, scoped writes, independent review, linked observability, multidimensional verification, repair/reverification, escalation, and terminal gates.
 
+## Workflow
+
+```mermaid
+flowchart TD
+    A["Start /saturation"] --> B["Read active context and code_styleguides"]
+    B --> C["Write .saturation/context.md"]
+    C --> D["Freeze context"]
+    D --> E["Split scoped assignments"]
+    E --> F["Implement in a fresh session"]
+    F --> G["Adversarial read-only review"]
+    G -->|"Gaps found"| H["Repair"]
+    H --> I["Fresh independent verification"]
+    I -->|"Fail"| H
+    I -->|"Pass"| J["Final review and completion gates"]
+    G -->|"No material gaps"| J
+    J -->|"Pass"| K["Promote"]
+    G --> L["Escalate conflicts or blockers"]
+    I --> L
+    J --> L
+```
+
 ## Run
 
 From the repository root, use the portable command:

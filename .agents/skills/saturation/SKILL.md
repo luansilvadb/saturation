@@ -1,70 +1,75 @@
 ---
 name: saturation
-description: "Orquestrar uma implementação por meio de subagentes a partir do contexto atual da sessão. Usar quando o usuário invocar /saturation para implementar, revisar e reparar uma tarefa preservando sua intenção e escopo."
+description: "Orchestrate implementation through subagents from the current session context. Use when the user invokes /saturation to implement, review, and repair a task while preserving its intent and scope."
 ---
 
-Ao iniciar `/saturation`, o orquestrador lê `code_styleguides/SKILL.md` e o
-contexto ativo, registra objetivo, escopo, qualidade, restrições, decisões,
-princípios e critérios de verificação em `.saturation/context.md`, e o congela
-antes do primeiro handoff. Use esse arquivo como fonte única e não o escreva
-depois do freeze; mudanças de intenção, escopo, qualidade ou restrições exigem
-decisão explícita do usuário.
+Language policy: this skill is English-only. Write all human-readable
+instructions, handoffs, reports, and other artifacts in English. Preserve
+machine-readable contract keys, identifiers, enum values, and paths exactly as
+defined.
 
-Divida o trabalho em assignments coerentes e disjuntos, cada um com owner,
-`read_scope` e `write_scope` relativos ao repositório. `read_scope` contém apenas
-paths normalizados sob `.saturation/context.md` ou
-`.agents/skills/saturation/evals`; toda leitura de evento ou tool call fica no
-`read_scope` do assignment declarado. Toda escrita de produto usa sessão fresca
-e fica no `write_scope`; a promoção tem assignment próprio. Cada handoff é um
-payload JSON validável, nunca prosa solta, com os campos existentes `context`,
-`assignment`, `state`, `evidence` e `fresh_session`, mais:
+When `/saturation` starts, the orchestrator reads `code_styleguides/SKILL.md`
+and the active context, records the objective, scope, quality, constraints,
+decisions, principles, and verification criteria in `.saturation/context.md`,
+and freezes it before the first handoff. Use this file as the single source of
+truth and do not write to it after the freeze; changes to intent, scope,
+quality, or constraints require an explicit user decision.
+
+Split the work into coherent and disjoint assignments, each with an owner,
+`read_scope`, and `write_scope` relative to the repository. `read_scope`
+contains only normalized paths under `.saturation/context.md` or
+`.agents/skills/saturation/evals`; every event or tool-call read belongs to the
+declared assignment's `read_scope`. All product writes use a fresh session and
+remain within `write_scope`; promotion has its own assignment. Each handoff is
+a validatable JSON payload, never loose prose, with the existing `context`,
+`assignment`, `state`, `evidence`, and `fresh_session` fields, plus:
 
 - `context`: `{ "path": ".saturation/context.md", "frozen": true }`;
-- `assignment`: `{ "id": string, "owner_actor_id": string, "read_scope": string[], "write_scope": string[] }`,
-  com campos exatamente iguais à declaração e ao assignment registrado;
+- `assignment`: `{ "id": string, "owner_actor_id": string, "read_scope": string[], "write_scope": string[] }`, with fields exactly matching the declaration and registered assignment;
 - `state`: `{ "phase": string, "status": "ready|running|needs_repair|verified|blocked", "decision": "continue|repair|verify|promote|escalate|complete|reject" }`;
 - `input`: `{ "objective": string, "scope": string[], "acceptance": string[], "constraints": string[] }`;
-- `output`: `{ "status": "complete|needs_repair|blocked", "event_ref": string, "changed_paths": string[], "verification_evidence": ["EV-..."], "unresolved_risks": string[], "evidence": ["EV-..."] }`, com `event_ref` apontando para a ação alvo e `changed_paths` igual aos writes dela;
-- `error`: `null` no sucesso ou `{ "code": string, "message": string, "retryable": boolean, "escalate": boolean, "evidence": ["EV-..."] }` no erro;
-- `stop`: `null` se o fluxo puder continuar ou `{ "required": true, "reason": string, "evidence": ["EV-..."] }` para blocker/risco não resolvido;
-- `tool_call_ref`: o `call_id` observável da ação ou decisão retornada;
-- `evidence`: IDs não vazios que resolvem no registro de evidências; e
-- `fresh_session: true`, sempre que houver delegação.
+- `output`: `{ "status": "complete|needs_repair|blocked", "event_ref": string, "changed_paths": string[], "verification_evidence": ["EV-..."], "unresolved_risks": string[], "evidence": ["EV-..."] }`, with `event_ref` pointing to the target action and `changed_paths` matching its writes;
+- `error`: `null` on success or `{ "code": string, "message": string, "retryable": boolean, "escalate": boolean, "evidence": ["EV-..."] }` on error;
+- `stop`: `null` if the flow can continue or `{ "required": true, "reason": string, "evidence": ["EV-..."] }` for a blocker or unresolved risk;
+- `tool_call_ref`: the observable `call_id` returned by the action or decision;
+- `evidence`: non-empty IDs that resolve in the evidence registry; and
+- `fresh_session: true` whenever delegation occurs.
 
-No retorno `complete`, `error` e `stop` são nulos e `unresolved_risks` é vazio;
-`needs_repair` mantém `error` e `stop` nulos e lista os riscos; `blocked` exige
-`error` tipado, riscos não resolvidos e `stop.required: true`. Toda ação registra
-ID único, actor, sessão, fase, `reads` e `writes`; `tool_call_ref` resolve um
-tool call do mesmo actor, e cada `evidence.source_id` resolve evento ou call,
-com `paths` observáveis em `reads`/`writes`. Decisões e transições de estado
-também apontam para evidência; não aceite estado, decisão ou claim sem link.
+For a `complete` return, `error` and `stop` are null and `unresolved_risks` is
+empty; `needs_repair` keeps `error` and `stop` null and lists the risks;
+`blocked` requires a typed `error`, unresolved risks, and
+`stop.required: true`. Every action records a unique ID, actor, session, phase,
+`reads`, and `writes`; `tool_call_ref` resolves to a tool call by the same
+actor, and each `evidence.source_id` resolves to an event or call, with
+observable `paths` in `reads`/`writes`. Decisions and state transitions also
+point to evidence; do not accept state, decision, or claim without a link.
 
-Após cada implementação, um reviewer fresco, adversarial e read-only lê o
-candidato e suas evidências, registra gaps e aponta o tool call de revisão.
-Depois de cada reparo, um verifier em sessão fresca e read-only verifica todos os
-gaps e cada critério de aceitação. Ele emite `result: "pass|fail"`,
-`independent: true`, `rechecks`, `tool_call_ref` e dimensões mínimas de
-`completeness`, `clarity`, `consistency` e `testability`. O
-`trace_contract.verifier.dimensions` declara exatamente essas quatro bases e
-pode declarar, em ordem, `behavior`, `error_handling` e `task_completion`; o
-payload e as evidências cobrem exatamente todas as dimensões declaradas. Inclua
-também as dimensões de trace (`context_freeze`, `tool_order`,
-`session_freshness`, `write_scope`, `handoff_payload`, `readonly_review`,
-`evidence`, `repair_reverify`, `completion_gates`, `escalation`). Cada dimensão
-tem `id`, `applicable`, `result: "pass|fail|not_applicable"`, claim não vazio e
-evidência não vazia ligada a um source observável; dimensão ausente, sem
-evidência ou falha impede conclusão. Uma dimensão opcional declarada mas não
-aplicável usa `applicable: false`, `result: "not_applicable"` e evidência para
-essa decisão. Falha retorna `output.status: "needs_repair"`;
-blocker retorna `output.status: "blocked"`, `error` tipado e `stop.required: true`.
-Repita `implementar → revisar → reparar → verificar` até a revisão final não
-apontar gaps materiais e todas as dimensões passarem; só então promova.
+After each implementation, a fresh, adversarial, read-only reviewer reads the
+candidate and its evidence, records gaps, and points to the review tool call.
+After each repair, a fresh, read-only verifier checks every gap and each
+acceptance criterion. It emits `result: "pass|fail"`, `independent: true`,
+`rechecks`, `tool_call_ref`, and the minimum dimensions of `completeness`,
+`clarity`, `consistency`, and `testability`. `trace_contract.verifier.dimensions`
+declares exactly those four base dimensions and may declare, in order,
+`behavior`, `error_handling`, and `task_completion`; the payload and evidence
+must cover exactly every declared dimension. Also include the trace dimensions
+(`context_freeze`, `tool_order`, `session_freshness`, `write_scope`,
+`handoff_payload`, `readonly_review`, `evidence`, `repair_reverify`,
+`completion_gates`, `escalation`). Each dimension has `id`, `applicable`,
+`result: "pass|fail|not_applicable"`, a non-empty claim, and non-empty evidence
+linked to an observable source; a missing, unsupported, or failed dimension
+prevents completion. A declared optional dimension that is not applicable uses
+`applicable: false`, `result: "not_applicable"`, and evidence for that decision.
+A failed check returns `output.status: "needs_repair"`; a blocker returns
+`output.status: "blocked"`, a typed `error`, and `stop.required: true`.
+Repeat `implement → review → repair → verify` until the final review finds no
+material gaps and all dimensions pass; only then promote.
 
-Mantenha reviewers e verifiers sem escrita, assignments e promoção dentro do
-escopo, e o contexto congelado imutável. Escale ao usuário conflitos reais,
-mudanças de escopo ou qualidade, operações de dados/efeitos reais e blockers;
-registre tipo, decisão e evidência da escala e nunca conclua com risco não
-resolvido. Decisões técnicas, sequência, pesquisa, testes e reparos ficam com
-o orquestrador. Cada report deve listar `changed_paths` exatos,
-`verification_evidence` e `unresolved_risks` (use `[]` quando não houver); o
-orquestrador consolida reports somente após os gates finais.
+Keep reviewers and verifiers write-free, keep assignments and promotion within
+scope, and keep the frozen context immutable. Escalate real conflicts, scope or
+quality changes, data/effect operations, and blockers to the user; record the
+escalation type, decision, and evidence, and never conclude with an unresolved
+risk. Technical decisions, sequencing, research, tests, and repairs remain with
+the orchestrator. Every report must list exact `changed_paths`,
+`verification_evidence`, and `unresolved_risks` (use `[]` when none exist); the
+orchestrator consolidates reports only after the final gates.

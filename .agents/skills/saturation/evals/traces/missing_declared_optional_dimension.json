@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "trace_id": "missing-declared-optional-dimension",
-  "objective": "validar ciclo completo de implementação, revisão, reparo, verificação e promoção",
+  "objective": "validate the complete implementation, review, repair, verification, and promotion lifecycle",
   "allowed_write_roots": [
     ".agents/skills/saturation/evals"
   ],
@@ -307,7 +307,7 @@
         ],
         "fresh_session": true,
         "input": {
-          "objective": "validar ciclo completo de implementação, revisão, reparo, verificação e promoção",
+          "objective": "validate the complete implementation, review, repair, verification, and promotion lifecycle",
           "scope": [
             ".agents/skills/saturation/evals"
           ],
@@ -400,7 +400,7 @@
         ],
         "fresh_session": true,
         "input": {
-          "objective": "validar ciclo completo de implementação, revisão, reparo, verificação e promoção",
+          "objective": "validate the complete implementation, review, repair, verification, and promotion lifecycle",
           "scope": [],
           "acceptance": [
             "context_freeze",
@@ -494,7 +494,7 @@
         ],
         "fresh_session": true,
         "input": {
-          "objective": "validar ciclo completo de implementação, revisão, reparo, verificação e promoção",
+          "objective": "validate the complete implementation, review, repair, verification, and promotion lifecycle",
           "scope": [
             ".agents/skills/saturation/evals"
           ],
@@ -590,7 +590,7 @@
         ],
         "fresh_session": true,
         "input": {
-          "objective": "validar ciclo completo de implementação, revisão, reparo, verificação e promoção",
+          "objective": "validate the complete implementation, review, repair, verification, and promotion lifecycle",
           "scope": [],
           "acceptance": [
             "context_freeze",
@@ -828,7 +828,7 @@
         ],
         "fresh_session": true,
         "input": {
-          "objective": "validar ciclo completo de implementação, revisão, reparo, verificação e promoção",
+          "objective": "validate the complete implementation, review, repair, verification, and promotion lifecycle",
           "scope": [],
           "acceptance": [
             "context_freeze",
@@ -947,7 +947,7 @@
       "evidence_id": "EV-001",
       "source_id": "C-001",
       "kind": "read",
-      "claim": "contexto congelado foi lido antes da delegação",
+      "claim": "frozen context was read before delegation",
       "paths": [
         ".saturation/context.md"
       ]
@@ -956,13 +956,13 @@
       "evidence_id": "EV-002",
       "source_id": "E-002",
       "kind": "handoff",
-      "claim": "handoff inicial carrega contexto, escopo, estado e sessão fresca"
+      "claim": "initial handoff carries context, scope, state, and a fresh session"
     },
     {
       "evidence_id": "EV-003",
       "source_id": "E-003",
       "kind": "diff",
-      "claim": "implementador escreveu a trace no escopo permitido",
+      "claim": "implementer wrote the trace within the allowed scope",
       "paths": [
         ".agents/skills/saturation/evals/traces/complete.json"
       ]
@@ -971,13 +971,13 @@
       "evidence_id": "EV-004",
       "source_id": "E-004",
       "kind": "handoff",
-      "claim": "handoff para revisão independente"
+      "claim": "handoff for independent review"
     },
     {
       "evidence_id": "EV-005",
       "source_id": "E-005",
       "kind": "review",
-      "claim": "revisão adversarial encontrou G-001",
+      "claim": "adversarial review found G-001",
       "paths": [
         ".agents/skills/saturation/evals/traces/complete.json"
       ]
@@ -986,13 +986,13 @@
       "evidence_id": "EV-006",
       "source_id": "E-006",
       "kind": "handoff",
-      "claim": "gap foi encaminhado ao reparador"
+      "claim": "gap was forwarded to the repairer"
     },
     {
       "evidence_id": "EV-007",
       "source_id": "E-007",
       "kind": "diff",
-      "claim": "reparo resolve G-001 com escrita scoped",
+      "claim": "repair resolves G-001 with a scoped write",
       "paths": [
         ".agents/skills/saturation/evals/traces/complete.json"
       ]
@@ -1001,19 +1001,19 @@
       "evidence_id": "EV-008",
       "source_id": "E-008",
       "kind": "handoff",
-      "claim": "handoff para verificação independente"
+      "claim": "handoff for independent verification"
     },
     {
       "evidence_id": "EV-010",
       "source_id": "E-010",
       "kind": "handoff",
-      "claim": "handoff para revisão final"
+      "claim": "handoff for final review"
     },
     {
       "evidence_id": "EV-011",
       "source_id": "E-011",
       "kind": "review",
-      "claim": "revisão final não encontrou gaps",
+      "claim": "final review found no gaps",
       "paths": [
         ".agents/skills/saturation/evals/traces/complete.json"
       ]
@@ -1022,7 +1022,7 @@
       "evidence_id": "EV-012",
       "source_id": "E-012",
       "kind": "promotion",
-      "claim": "promoção aprovada no escopo",
+      "claim": "promotion approved within scope",
       "paths": [
         ".agents/skills/saturation/evals/traces/complete.json"
       ]
@@ -1031,7 +1031,7 @@
       "evidence_id": "EV-013",
       "source_id": "E-013",
       "kind": "gate",
-      "claim": "completion gate terminal confirma conclusão"
+      "claim": "terminal completion gate confirms completion"
     },
     {
       "evidence_id": "EV-inspect",
@@ -1191,7 +1191,7 @@
       "risk_id": "R-001",
       "kind": "quality_change",
       "requires_escalation": true,
-      "description": "gap de qualidade G-001"
+      "description": "G-001 quality gap"
     }
   ],
   "escalations": [
