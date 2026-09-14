@@ -1,6 +1,6 @@
 {
   "schema_version": 3,
-  "trace_id": "missing-declared-optional-dimension",
+  "trace_id": "trace-complete",
   "objective": "validate the complete implementation, review, repair, verification, and promotion lifecycle",
   "allowed_write_roots": [
     ".agents/skills/saturation/evals"
@@ -161,7 +161,7 @@
       ],
       "event_ref": "E-003",
       "sequence": 6,
-      "prompt_id": "P-001"
+      "prompt_id": null
     },
     {
       "call_id": "C-004",
@@ -741,6 +741,15 @@
               "claim": "verified",
               "evidence": [
                 "EV-ver-testability"
+              ]
+            },
+            "behavior": {
+              "id": "behavior",
+              "applicable": true,
+              "result": "pass",
+              "claim": "verified",
+              "evidence": [
+                "EV-ver-behavior"
               ]
             },
             "error_handling": {
@@ -1568,8 +1577,7 @@
     }
   },
   "expected_failed_criteria": [
-    "evidence",
-    "repair_reverify"
+    "prompt_contract"
   ],
   "trace_schema_version": 3,
   "score_max": 110,

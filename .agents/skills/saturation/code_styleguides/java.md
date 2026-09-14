@@ -447,9 +447,6 @@ alternative.
 ## Sources
 
 -   [Google Java Style Guide](https://google.github.io/styleguide/javaguide.html)
--   [Prompt Engineering Guide](https://www.promptingguide.ai/)
-
-The prompt structure follows the guide's practical principles: state the
-instruction and context, define the expected output, be specific without
-adding irrelevant detail, provide examples, make quality gates explicit, handle
-errors visibly, and iterate based on observed behavior.
+-   Prompt construction and evaluation are centralized in
+    [`prompting.md`](prompting.md). Read that module when this Java guide is
+    being used to compose an operational agent prompt.

@@ -1,17 +1,18 @@
 {
-  "schema_version": 2,
-  "trace_schema_version": 2,
-  "score_max": 100,
+  "schema_version": 3,
+  "trace_schema_version": 3,
+  "score_max": 110,
   "acceptance": {
     "decision": "ACCEPT",
-    "score": 100,
+    "score": 110,
     "grade": "A"
   },
   "contracts": {
     "sequence": "Every event and tool call has a unique integer sequence in one merged lifecycle; array order, phase order, call-before-event links, and handoff-before-target links are strictly causal.",
     "causal_links": "Operational event and tool links are bidirectional and exactly match phase, actor, assignment, reads, and writes.",
     "handoff": "Every handoff has exact typed context, assignment (including normalized read_scope and write_scope), state, input, output, error, stop, evidence, and fresh_session fields; output status is complete, needs_repair, or blocked, and output targets, changed paths, outcome state, and unique target backrefs agree.",
-    "verifier": "The verifier has the four base dimensions plus exactly the trace-declared optional dimensions and all ten rubric criteria, each with distinct aligned verifier-sourced evidence."
+    "verifier": "The verifier has the four base dimensions plus exactly the trace-declared optional dimensions and all eleven rubric criteria, each with distinct aligned verifier-sourced evidence.",
+    "prompt": "Every dispatched prompt has the canonical nine sections, ordered module hashes, adaptive strategy metadata, phase output contract, PCP arithmetic, quality gates, sanitized immutable text, causal links, and review coverage; blocked attempts are bounded and linked."
   },
   "criteria": [
     {
@@ -63,22 +64,35 @@
       "id": "escalation",
       "points": 10,
       "checks": ["risk_types", "all_escalated", "decision", "evidence", "no_unresolved"]
+    },
+    {
+      "id": "prompt_contract",
+      "points": 10,
+      "checks": ["declaration", "catalog", "coverage", "causal_links", "rendered_structure", "modules", "strategy", "output_contract", "complexity", "quality_gates", "security", "attempt_lineage", "review_coverage", "hash", "complete"]
     }
   ],
   "regression_matrix": [
-    {"trace": "complete.json", "decision": "ACCEPT", "score": 100, "grade": "A", "failed_criteria": []},
+    {"trace": "complete.json", "decision": "ACCEPT", "score": 110, "grade": "A", "failed_criteria": []},
     {"trace": "incomplete_handoff.json", "decision": "REJECT", "failed_criteria": ["handoff_payload"]},
     {"trace": "missing_freeze.json", "decision": "REJECT", "failed_criteria": ["context_freeze"]},
     {"trace": "missing_handoff_contract.json", "decision": "REJECT", "failed_criteria": ["handoff_payload"]},
     {"trace": "missing_reverify.json", "decision": "REJECT", "failed_criteria": ["repair_reverify"]},
     {"trace": "missing_declared_optional_dimension.json", "decision": "REJECT", "failed_criteria": ["evidence", "repair_reverify"]},
     {"trace": "missing_verifier_dimension_criterion.json", "decision": "REJECT", "failed_criteria": ["evidence", "repair_reverify"]},
+    {"trace": "missing_tool_event_ref.json", "decision": "REJECT", "failed_criteria": ["evidence"]},
     {"trace": "out_of_read_scope.json", "decision": "REJECT", "failed_criteria": ["write_scope"]},
     {"trace": "out_of_scope_write.json", "decision": "REJECT", "failed_criteria": ["write_scope"]},
     {"trace": "premature_completion.json", "decision": "REJECT", "failed_criteria": ["completion_gates"]},
     {"trace": "reviewer_not_readonly.json", "decision": "REJECT", "failed_criteria": ["write_scope", "readonly_review"]},
     {"trace": "unrelated_evidence_tool_link.json", "decision": "REJECT", "failed_criteria": ["evidence"]},
-    {"trace": "wrong_tool_order.json", "decision": "REJECT", "failed_criteria": ["tool_order"]}
-    ,{"trace": "missing_tool_event_ref.json", "decision": "REJECT", "failed_criteria": ["evidence"]}
+    {"trace": "wrong_tool_order.json", "decision": "REJECT", "failed_criteria": ["tool_order"]},
+    {"trace": "prompt_bad_headings.json", "decision": "REJECT", "failed_criteria": ["prompt_contract"]},
+    {"trace": "prompt_bad_hash.json", "decision": "REJECT", "failed_criteria": ["prompt_contract"]},
+    {"trace": "prompt_bad_pcp.json", "decision": "REJECT", "failed_criteria": ["prompt_contract"]},
+    {"trace": "prompt_missing_catalog.json", "decision": "REJECT", "failed_criteria": ["prompt_contract"]},
+    {"trace": "prompt_missing_reverse_link.json", "decision": "REJECT", "failed_criteria": ["prompt_contract"]},
+    {"trace": "prompt_strategy_gate.json", "decision": "REJECT", "failed_criteria": ["prompt_contract"]},
+    {"trace": "prompt_untrusted_boundary.json", "decision": "REJECT", "failed_criteria": ["prompt_contract"]},
+    {"trace": "prompt_attempt_limit.json", "decision": "REJECT", "failed_criteria": ["prompt_contract"]}
   ]
 }

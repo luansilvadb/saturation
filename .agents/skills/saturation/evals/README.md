@@ -1,91 +1,198 @@
 # Saturation trace evals
 
-These deterministic, standard-library-only evals grade synthetic workflow traces for the `saturation` skill: frozen context, fresh handoffs, scoped writes, independent review, linked observability, multidimensional verification, repair/reverification, escalation, and terminal gates.
+These deterministic, standard-library-only evals grade the observable
+workflow of the `saturation` skill: frozen context, scoped assignments, fresh
+handoffs, independent review, repair/reverification, escalation, completion
+gates, and the v3 prompt contract.
 
-## Workflow
+## Evaluation flow
 
 ```mermaid
 flowchart TD
-    A["Start /saturation"] --> B["Read active context and code_styleguides"]
-    B --> C["Write .saturation/context.md"]
-    C --> D["Freeze context"]
-    D --> E["Split scoped assignments"]
-    E --> F["Implement in a fresh session"]
-    F --> G["Adversarial read-only review"]
-    G -->|"Gaps found"| H["Repair"]
-    H --> I["Fresh independent verification"]
-    I -->|"Fail"| H
-    I -->|"Pass"| J["Final review and completion gates"]
-    G -->|"No material gaps"| J
-    J -->|"Pass"| K["Promote"]
-    G --> L["Escalate conflicts or blockers"]
-    I --> L
-    J --> L
+    A["Context + modular style guides"] --> B["Compose prompt"]
+    B --> C["Lint + PCP + quality gates"]
+    C -->|pass| D["Record immutable prompt"]
+    C -->|fail| X["Blocked prompt attempt"]
+    D --> E["Dispatch one prompt to one actor"]
+    E --> F["Trace handoff, event, call, and evidence"]
+    F --> G["Review prompt and result"]
+    G --> H["Repair and independently verify"]
+    H --> I["Final review + completion gate"]
+    I --> J["Promotion"]
 ```
+
+The prompt validator runs before the workflow grader conceptually:
+`compose → lint → PCP → gates → record → dispatch`. The repository fixtures
+are self-contained; no network, model, third-party package, or external write
+is required.
 
 ## Run
 
-From the repository root, use the portable command:
+From the repository root:
 
 ```text
+python .agents/skills/saturation/evals/prompt_contract.py --trace .agents/skills/saturation/evals/traces/complete.json --root .
 python .agents/skills/saturation/evals/report.py
-```
-
-Options are `--traces DIR` to grade another directory of direct `*.json` files and `--json` to emit the complete machine-readable report. The command exits 0 only when traces exist, every declared expectation matches the actual grade, and every ACCEPT is genuinely 100/A; otherwise it exits 1.
-
-Focused tests use:
-
-```text
 python .agents/skills/saturation/evals/test_grader.py
 ```
 
-## Trace contract
+The prompt validator accepts `--json` for machine-readable errors. The report
+accepts `--traces DIR` and `--json`. It exits 0 only when all fixtures match
+their declared expectations and every `ACCEPT` is exactly `110/110` with
+grade `A`.
 
-Essential top-level fields are `schema_version: 2`, the fixed `trace_contract`, non-empty `trace_id` and `objective`, `allowed_write_roots`, `actors`, `assignments`, `tool_calls`, `events`, and `evidence`. Actors need `role` and `session_id`; events and calls need unique IDs, actor references, reads/writes, valid kinds/phases, and one shared integer sequence. Evidence needs an ID, source ID, kind, and claim. See `grader.py` for the executable schema and behavioral checks.
+The fixture grader deliberately narrows synthetic `read_scope` values to the
+context, style-guide, and eval roots so the fixtures stay self-contained. That
+test-only boundary does not limit the general `saturation` skill, which may
+read explicitly assigned product paths.
 
-Each handoff event has a machine-checkable JSON `payload` with the existing `context`, `assignment`, `state`, `evidence`, and `fresh_session` fields plus these typed fields:
+## Prompt contract v3
 
-| Field | Required shape and rule |
-|---|---|
-| `context` | Object `{ "path": ".saturation/context.md", "frozen": true }`. |
-| `assignment` | Object `{ "id": string, "owner_actor_id": string, "read_scope": string[], "write_scope": string[] }`, exactly matching the declared assignment fields and registered assignment. |
-| `state` | Object with non-empty `phase`, `status` in `ready\|running\|needs_repair\|verified\|blocked`, and `decision` in `continue\|repair\|verify\|promote\|escalate\|complete\|reject`. |
-| `input` | Object with non-empty `objective`, `scope: string[]`, `acceptance: string[]`, and `constraints: string[]`; echo it on return. |
-| `output` | `{ "status": "complete\|needs_repair\|blocked", "event_ref": string, "changed_paths": string[], "verification_evidence": ["EV-..."], "unresolved_risks": string[], "evidence": ["EV-..."] }`; `event_ref` and `changed_paths` exactly match the target action. |
-| `error` | `null` on success, or `{ "code": string, "message": string, "retryable": boolean, "escalate": boolean, "evidence": ["EV-..."] }`; a result has exactly one non-null `output` or `error`. |
-| `stop` | `null` when work may continue, or `{ "required": true, "reason": string, "evidence": ["EV-..."] }` for a blocker or unresolved risk; `required: true` forbids promotion. |
-| `tool_call_ref` | A returned action/decision’s `call_id`, resolving to a tool call by the same actor and phase. |
-| `evidence` | A non-empty list of registered evidence IDs; delegated sessions set `fresh_session: true`. |
+`code_styleguides/prompting.md` is the cross-cutting prompt module. Every
+operational prompt reads the complete modules in this order:
 
-Strings are non-empty, paths are repository-relative, IDs resolve to declared records, and no failure is silently represented as a successful output. Assignment `read_scope` entries are unique normalized paths confined to `.saturation/context.md` or `.agents/skills/saturation/evals`; every non-empty event/call read list requires a declared assignment owned by its actor and stays within that assignment's `read_scope`. The existing `write_scope`, allowed-write-root, ownership, and read-only checks remain independent. A `complete` output has no error, stop, or unresolved risk; `needs_repair` has unresolved risks but no error or stop; `blocked` has unresolved risks, a typed error, and `stop.required: true`. Every event and tool call records its actor, session, phase/kind, reads, and writes. All events and calls are sorted into one unique integer sequence that must follow `freeze → inspect → implement → initial review → repair → verify → final review → promote → completion gate`; each linked call precedes its event and each handoff precedes its target. Every action payload links `tool_call_ref` to `tool_calls.call_id`; every evidence record links `source_id` to an event or call, and any evidence paths must occur in that source’s reads or writes. Every direct event evidence ref must be sourced by that event or its exact linked call. The terminal gate may instead refer only to the exact final-review, verification, promotion, and gate decision events/calls. State, decisions, and claims are rejected when they have no observable evidence link.
+1. `prompting.md`;
+2. `general.md`;
+3. applicable language modules in stable lexical order.
 
-The verifier is fresh, independent, read-only, and runs after repair. `trace_contract.verifier.dimensions` always declares the base dimensions `completeness`, `clarity`, `consistency`, and `testability`, followed in canonical order by any selected optional dimensions: `behavior`, `error_handling`, and `task_completion`. Its `verify` payload keeps `result: "pass|fail"`, `independent: true`, `rechecks: [gap_id]`, and `tool_call_ref`, and contains a `dimensions` object keyed by exactly every declared dimension. For trace-level coverage, the separate `criteria` object contains exactly `context_freeze`, `tool_order`, `session_freshness`, `write_scope`, `handoff_payload`, `readonly_review`, `evidence`, `repair_reverify`, `completion_gates`, and `escalation`. Each dimension record is `{ "id": string, "applicable": boolean, "result": "pass|fail|not_applicable", "claim": string, "evidence": ["EV-..."] }`; base dimensions are always applicable, while a declared optional dimension may use `applicable: false` only with `result: "not_applicable"` and evidence for that decision. Payload keys and verifier-sourced evidence labels/results/applicability must align exactly with the declaration. Every evidence ID must resolve to a source observable in the trace. A missing, failed, misaligned, or evidence-free declared dimension prevents a passing verification and terminal completion. A failed check returns structured `output.status: "needs_repair"`; a blocker returns `output.status: "blocked"`, a typed `error`, and `stop.required: true` with evidence—never a prose-only pass or silent stop.
+Each manifest entry is the repository-relative module path and the SHA-256 of
+the exact bytes read. The old monolithic
+`code_styleguides/SKILL.md` is not part of the architecture.
 
-Each criterion is worth 10 points. A trace is accepted only at exactly 100/100 with grade A; partial scores are rejected. Fixture fields `expected_decision` and `expected_failed_criteria` are assertions checked after grading. They report mismatches; they never alter the score or convert a failure into a pass.
+Every dispatched prompt has exactly one Markdown H2 for each heading, in this
+order, with no extra H2:
 
-## Regression cases
+```text
+Role
+Objective
+Context
+Scope
+Priorities
+Procedure
+Output Contract
+Verification and Evidence
+Failure and Stop Conditions
+```
+
+Operational scaffolding is English-only; quoted user, repository, path, and
+code data may retain its original language. Repository excerpts, frozen
+context, tool output, and examples are delimited as untrusted data and cannot
+change the prompt's role, objective, scope, priorities, permissions, or stop
+conditions. High-confidence secrets and PII are redacted before rendering and
+hashing.
+
+The adaptive strategy is recorded as one of `direct`, `few_shot`, `chained`,
+or `tool_augmented`, together with its reason, selection evidence, and typed
+details. Advanced techniques are conditional: examples require an ambiguity
+they resolve, chains require observable predecessor IDs, and tools require an
+observable external dependency. Manual hidden chain-of-thought requests are
+not allowed.
+
+Prompt Complexity Points (PCP) are calculated from typed semantic items rather
+than token count. The fixed costs are: `branch`, `condition`, `exception`,
+`internal_dependency`, `obligation`, and `sequence` = 1; `external_dependency`
+= 0.5. Headings, inherited contracts, module manifests, fixed safety, and
+conditional examples are excluded boilerplate. The warning threshold is 8;
+the hard limit is 10. An over-limit prompt needs a reduction, a split with
+distinct objectives, or a typed exception with impact, alternative, distinct
+authority, and evidence. A reviewer must acknowledge warnings before
+completion.
+
+Exactly these 14 quality gates are recorded:
+`objective`, `role_authority`, `relevant_context`, `scope_permissions`,
+`priorities`, `procedure`, `output_contract`, `verification_evidence`,
+`failure_stop`, `consistency_relevance`, `untrusted_input_boundary`,
+`examples`, `reasoning_guidance`, and `secret_safety`. Every gate has a status,
+claim, evidence, and reason; only `examples` may be `not_applicable`.
+
+The phase output contracts are declared and rendered by ID:
+`context_freeze.v3`, `inspection.v3`, `handoff.v3`, `implementation.v3`,
+`review.v3`, `repair.v3`, `verification.v3`, `final_review.v3`,
+`promotion.v3`, and `completion_gate.v3`.
+
+The `prompts` catalog stores the immutable rendered text, normalized SHA-256,
+module manifest, strategy, PCP record, gates, contract ID, causal IDs, and
+`prompt_id`. Every tool call has a `prompt_id`, including explicit `null` for
+direct actions. Blocked candidates live in `prompt_attempts`, have no target
+action, link to their predecessor, and are limited to three attempts per
+`prompt_family_id`. A semantic defect after dispatch creates a new prompt and
+fresh handoff; it never edits the old prompt.
+
+Prompt text normalization is deterministic: CRLF/CR to LF, Unicode NFC,
+trailing line-ending whitespace removed, edge blank lines removed, exactly one
+final LF, then UTF-8 lowercase SHA-256. The validator recalculates the hash.
+
+## Trace schema and grading
+
+Schema v3 requires a strict `trace_contract` containing the workflow
+declarations and the prompt declaration (`policy_version: pcp-v1`), plus
+non-empty `trace_id`, `objective`, `allowed_write_roots`, `actors`,
+`assignments`, `tool_calls`, `events`, and `evidence`. Events and calls share a
+unique causal sequence. Handoffs use typed `context`, `assignment`, `state`,
+`input`, `output`, `error`, `stop`, `evidence`, and `fresh_session` fields.
+
+The verifier is fresh, independent, read-only, and must cover the four base
+dimensions (`completeness`, `clarity`, `consistency`, `testability`), any
+declared optional dimensions, and all 11 rubric criteria, including
+`prompt_contract`. Review events cover every prompt and blocked attempt and
+acknowledge every PCP warning.
+
+There are 11 criteria worth 10 points each. Acceptance is exact: `ACCEPT`
+requires `110/110` and grade `A`; any failed criterion produces `REJECT`.
+Fixture fields `expected_decision` and `expected_failed_criteria` are checked
+as assertions and never override the grade.
+
+The report also emits descriptive, non-decisive metrics: prompt and attempt
+counts, repair count, PCP average/max/percentiles, warning and exception
+counts, strategy distribution, gate failures, and chain aggregates where
+applicable. Synthetic fixtures do not invent benchmark outcome statistics; an
+optional `evaluation` object is reserved for real benchmark runs.
+
+## Regression matrix
 
 | Trace | Expected result | Target criterion(s) |
 |---|---|---|
-| `complete.json` | ACCEPT, 100/A | none |
+| `complete.json` | ACCEPT, 110/A | none |
 | `incomplete_handoff.json` | REJECT | `handoff_payload` |
 | `missing_freeze.json` | REJECT | `context_freeze` |
 | `missing_handoff_contract.json` | REJECT | `handoff_payload` |
 | `missing_reverify.json` | REJECT | `repair_reverify` |
 | `missing_declared_optional_dimension.json` | REJECT | `evidence`, `repair_reverify` |
-| `missing_tool_event_ref.json` | REJECT | `evidence` |
 | `missing_verifier_dimension_criterion.json` | REJECT | `evidence`, `repair_reverify` |
+| `missing_tool_event_ref.json` | REJECT | `evidence` |
 | `out_of_read_scope.json` | REJECT | `write_scope` |
 | `out_of_scope_write.json` | REJECT | `write_scope` |
 | `premature_completion.json` | REJECT | `completion_gates` |
 | `reviewer_not_readonly.json` | REJECT | `write_scope`, `readonly_review` |
 | `unrelated_evidence_tool_link.json` | REJECT | `evidence` |
 | `wrong_tool_order.json` | REJECT | `tool_order` |
+| `prompt_bad_headings.json` | REJECT | `prompt_contract` |
+| `prompt_bad_hash.json` | REJECT | `prompt_contract` |
+| `prompt_bad_pcp.json` | REJECT | `prompt_contract` |
+| `prompt_missing_catalog.json` | REJECT | `prompt_contract` |
+| `prompt_missing_reverse_link.json` | REJECT | `prompt_contract` |
+| `prompt_strategy_gate.json` | REJECT | `prompt_contract` |
+| `prompt_untrusted_boundary.json` | REJECT | `prompt_contract` |
+| `prompt_attempt_limit.json` | REJECT | `prompt_contract` |
 
-## Baseline and post-verification
+Keep the rubric, fixtures, and focused tests synchronized whenever the schema
+or a criterion changes. Inspect the final diff and report exact changed paths,
+verification evidence, and unresolved risks (`[]` when none).
 
-The repo-local report grades all checked-in fixtures as expected and exits 0; `complete.json` remains exactly 100/A and every negative fixture is rejected for its declared criterion set. The original requested `agent eval report with graded traces` command could not run because `agent` is unavailable. Preserve those fixtures and report this limitation rather than claiming the exact command succeeded.
+## References and limitations
 
-Before promotion, preserve the lifecycle gates: freeze `.saturation/context.md` before delegation and never list that path in any event or tool-call `writes`; use fresh, distinct writer, reviewer, and verifier sessions; keep assignments and promotion inside `allowed_write_roots`; make review adversarial and read-only; run `implement → review → repair → verify → final review → promote` in order; and escalate scope/quality changes, conflicts, data/effect operations, and blockers. Completion requires a clear final review, independent passing verification for every declared criterion and applicable dimension, reviewed promotion, and no unresolved blocker.
+The PCP design is an explicitly labeled engineering hypothesis inspired by
+Gustavo Pinto and Alberto de Souza, *Cognitive-Driven Development Helps
+Software Teams to Keep Code Units Under the Limit!*,
+[arXiv:2210.07342v2](https://arxiv.org/abs/2210.07342). The paper reports one
+Java team and product with manual annotations; it does not empirically
+validate this prompt taxonomy or its thresholds.
 
-Every run report must list exact repository-relative `changed_paths`, `verification_evidence` (commands, exit codes, trace IDs, or evidence IDs), and `unresolved_risks` (use `[]` when none). Inspect the final diff and confirm it contains only the assigned paths. No network, third-party package, or external write is required by these tests.
+The prompt policy also records the relevant, conditional practices from the
+[Prompt Engineering Guide](https://www.promptingguide.ai/): explicit prompt
+elements, specificity, delimiters and trust boundaries, few-shot selection,
+prompt chaining, context engineering, observable tool contracts, workflow
+decomposition, iterative evaluation, factuality limits, and prompt-injection
+defenses. These sources inform the policy; they are not treated as evidence
+that the local PCP thresholds improve outcomes. Evaluation claims must come
+from actual synchronized fixtures or benchmark data.

@@ -4,17 +4,24 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import posixpath
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+import prompt_contract
 
-SCHEMA_VERSION = 2
-CURRENT_SCHEMA_VERSION = 2
+
+SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 3
 SUPPORTED_SCHEMA_VERSIONS = {CURRENT_SCHEMA_VERSION}
 EXPECTED_WRITE_ROOT = ".agents/skills/saturation/evals"
 CONTEXT_PATH = ".saturation/context.md"
-EXPECTED_READ_ROOTS = (CONTEXT_PATH, EXPECTED_WRITE_ROOT)
+EXPECTED_READ_ROOTS = (
+    CONTEXT_PATH,
+    ".agents/skills/saturation/code_styleguides",
+    EXPECTED_WRITE_ROOT,
+)
 EVENT_KINDS = {
     "context_frozen",
     "inspection",
@@ -49,7 +56,7 @@ EVIDENCE_KINDS = {
 RISK_KINDS = {"scope_conflict", "quality_change", "data_effect", "blocker"}
 READ_ONLY_ROLES = {"reviewer", "verifier"}
 
-# Schema v2 fixes the handoff, verifier, sequence, and reverse-link contracts;
+# Schema v3 fixes the handoff, verifier, prompt, sequence, and reverse-link contracts;
 # missing fields cannot be mistaken for a successful delivery or verification.
 HANDOFF_INPUT_FIELDS = ("context", "assignment", "state", "input", "output", "error", "stop", "evidence", "fresh_session")
 HANDOFF_ASSIGNMENT_FIELDS = ("id", "owner_actor_id", "read_scope", "write_scope")
@@ -63,7 +70,17 @@ HANDOFF_OUTPUT_FIELDS = (
 )
 HANDOFF_ERROR_FIELDS = ("code", "message", "retryable", "escalate", "evidence")
 HANDOFF_OUTPUT_STATUSES = {"complete", "needs_repair", "blocked"}
-HANDOFF_PHASES = {"implement", "review", "repair", "verify", "final_review"}
+HANDOFF_PHASES = {
+    "freeze_context",
+    "inspect",
+    "implement",
+    "review",
+    "final_review",
+    "repair",
+    "verify",
+    "promote",
+    "completion_gate",
+}
 HANDOFF_STATE_STATUSES = {"ready", "running", "needs_repair", "verified", "blocked"}
 HANDOFF_STATE_DECISIONS = {
     "continue",
@@ -100,11 +117,15 @@ TOOL_PHASE_ROLES = {
     "completion_gate": "orchestrator",
 }
 HANDOFF_TARGET_KINDS = {
+    "freeze_context": "context_frozen",
+    "inspect": "inspection",
     "implement": "implementation",
     "review": "review",
+    "final_review": "review",
     "repair": "repair",
     "verify": "verify",
-    "final_review": "review",
+    "promote": "promotion",
+    "completion_gate": "completion_gate",
 }
 EVIDENCE_SOURCE_KINDS = {
     "read": {"context_frozen", "inspection", "freeze_context", "inspect"},
@@ -128,7 +149,9 @@ CRITERIA = (
     ("repair_reverify", "repair and reverification"),
     ("completion_gates", "completion gates"),
     ("escalation", "conflict and blocker escalation"),
+    ("prompt_contract", "prompt composition and trace contract"),
 )
+MAX_SCORE = len(CRITERIA) * 10
 
 
 def load_trace(path: Path) -> Dict[str, Any]:
@@ -323,17 +346,19 @@ def _linked_call_event(
 
 
 def _contract_declaration_errors(trace: Dict[str, Any]) -> List[str]:
-    """Validate the fixed v2 declaration without inspecting event semantics."""
+    """Validate the fixed v3 declaration without inspecting event semantics."""
 
     if "trace_contract" not in trace:
-        return ["schema_version 2 requires trace_contract"]
+        return ["schema_version 3 requires trace_contract"]
     declaration = trace.get("trace_contract")
     if not isinstance(declaration, dict):
         return ["trace_contract must be an object"]
 
     errors: List[str] = []
+    if set(declaration) != {"version", "causal_links", "handoff", "verifier", "prompt"}:
+        errors.append("trace_contract must contain the fixed v3 declarations")
     if declaration.get("version") != CURRENT_SCHEMA_VERSION:
-        errors.append("trace_contract.version must be 2")
+        errors.append("trace_contract.version must be 3")
     if declaration.get("causal_links") != "bidirectional":
         errors.append("trace_contract.causal_links must be bidirectional")
 
@@ -371,6 +396,10 @@ def _contract_declaration_errors(trace: Dict[str, Any]) -> List[str]:
             errors.append("trace_contract.verifier.dimensions must contain the base dimensions followed by declared optional dimensions")
         if verifier.get("criteria") != expected_criteria:
             errors.append("trace_contract.verifier.criteria are not the rubric criteria")
+    errors.extend(
+        "prompt declaration: " + error
+        for error in prompt_contract.validate_prompt_declaration(declaration.get("prompt"))
+    )
     return errors
 
 
@@ -381,8 +410,8 @@ def validate_trace(trace: Any) -> List[str]:
     if not isinstance(trace, dict):
         return ["root must be an object"]
     schema_version = trace.get("schema_version")
-    if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
-        errors.append("schema_version must be 2")
+    if not isinstance(schema_version, int) or isinstance(schema_version, bool) or schema_version not in SUPPORTED_SCHEMA_VERSIONS:
+        errors.append("schema_version must be 3")
     elif schema_version == CURRENT_SCHEMA_VERSION or "trace_contract" in trace:
         errors.extend(_contract_declaration_errors(trace))
     for key in ("trace_id", "objective"):
@@ -419,7 +448,8 @@ def validate_trace(trace: Any) -> List[str]:
             errors.append("duplicate assignment_id %s" % assignment_id)
         else:
             assignment_ids.add(assignment_id)
-        if assignment.get("owner_actor_id") not in actors if isinstance(actors, dict) else True:
+        owner_actor_id = assignment.get("owner_actor_id")
+        if not isinstance(owner_actor_id, str) or owner_actor_id not in actors if isinstance(actors, dict) else True:
             errors.append("assignment has unknown owner_actor_id")
         if set(assignment) != {"assignment_id", "owner_actor_id", "read_scope", "write_scope"}:
             errors.append("assignment %s must contain the exact assignment contract" % assignment_id)
@@ -444,9 +474,10 @@ def validate_trace(trace: Any) -> List[str]:
             errors.append("duplicate trace item id %s" % event_id)
         else:
             item_ids.add(event_id)
-        if event.get("kind") not in EVENT_KINDS:
+        if not isinstance(event.get("kind"), str) or event.get("kind") not in EVENT_KINDS:
             errors.append("event %s has unknown kind" % event_id)
-        if event.get("actor_id") not in actors if isinstance(actors, dict) else True:
+        event_actor_id = event.get("actor_id")
+        if not isinstance(event_actor_id, str) or event_actor_id not in actors if isinstance(actors, dict) else True:
             errors.append("event %s has unknown actor_id" % event_id)
         for field in ("reads", "writes"):
             if not isinstance(event.get(field), list):
@@ -471,9 +502,10 @@ def validate_trace(trace: Any) -> List[str]:
             errors.append("duplicate trace item id %s" % call_id)
         else:
             item_ids.add(call_id)
-        if call.get("phase") not in TOOL_PHASES:
+        if not isinstance(call.get("phase"), str) or call.get("phase") not in TOOL_PHASES:
             errors.append("tool call %s has unknown phase" % call_id)
-        if call.get("actor_id") not in actors if isinstance(actors, dict) else True:
+        call_actor_id = call.get("actor_id")
+        if not isinstance(call_actor_id, str) or call_actor_id not in actors if isinstance(actors, dict) else True:
             errors.append("tool call %s has unknown actor_id" % call_id)
         for field in ("name", "mode"):
             if not _nonempty_string(call.get(field)):
@@ -498,7 +530,7 @@ def validate_trace(trace: Any) -> List[str]:
                 evidence_ids.add(record_id)
             if not _nonempty_string(record.get("source_id")):
                 errors.append("evidence %s has no source_id" % record_id)
-            if record.get("kind") not in EVIDENCE_KINDS:
+            if not isinstance(record.get("kind"), str) or record.get("kind") not in EVIDENCE_KINDS:
                 errors.append("evidence %s has unknown kind" % record_id)
             if not _nonempty_string(record.get("claim")):
                 errors.append("evidence %s has no claim" % record_id)
@@ -1459,6 +1491,18 @@ def _grade_evidence(trace: Dict[str, Any]) -> Dict[str, Any]:
     for escalation in _list(trace.get("escalations")):
         if isinstance(escalation, dict):
             used_evidence.update(_id_set(escalation.get("evidence")))
+    for record in _list(trace.get("prompts")) + _list(trace.get("prompt_attempts")):
+        if not isinstance(record, dict):
+            continue
+        used_evidence.update(_id_set(record.get("selection_evidence")))
+        used_evidence.update(_id_set(record.get("evidence")))
+        for gate in _mapping(record.get("quality_gates")).values():
+            used_evidence.update(_id_set(_mapping(gate).get("evidence")))
+        exception = _mapping(_mapping(record.get("complexity")).get("exception"))
+        used_evidence.update(_id_set(exception.get("evidence")))
+    for event in _list(trace.get("events")):
+        if isinstance(event, dict):
+            used_evidence.update(_id_set(_mapping(_payload(event).get("prompt_review")).get("evidence")))
     all_records_used = set(record_map) <= used_evidence
     required = {
         "read": any(item.get("kind") == "read" for item in records),
@@ -1580,6 +1624,180 @@ def _grade_escalation(trace: Dict[str, Any]) -> Dict[str, Any]:
     return _result(CRITERIA[9][0], CRITERIA[9][1], checks)
 
 
+def _prompt_error_subset(errors: Sequence[str], *terms: str) -> List[str]:
+    return [error for error in errors if any(term in error for term in terms)]
+
+
+def _grade_prompt_contract(trace: Dict[str, Any]) -> Dict[str, Any]:
+    """Grade the observable prompt contract without judging prose semantics."""
+
+    errors = prompt_contract.validate_prompt_catalog(trace)
+
+    def clean(terms: Sequence[str]) -> bool:
+        return not _prompt_error_subset(errors, *terms)
+
+    checks = [
+        ("declaration", clean(("prompt declaration",)), "prompt policy declaration must be v3 and canonical"),
+        ("catalog", clean(("prompt record", "prompt attempt", "prompt IDs", "attempt IDs", "prompts must", "prompt_attempts must")), "prompt catalogs and exact record fields must be present"),
+        ("coverage", clean(("no dispatched prompt record", "each handoff", "handoff_event_id")), "each prompted handoff must have one prompt"),
+        ("causal_links", clean(("target event", "target call", "prompt actor", "target tool call", "prompt_id")), "prompt, event, call, actor, and handoff links must agree"),
+        ("rendered_structure", clean(("rendered_prompt", "headings", "section", "sentinel", "hidden reasoning")), "rendered prompts must have canonical structure and trust boundaries"),
+        ("modules", clean(("module",)), "module manifests must be ordered, known, and hashed"),
+        ("strategy", clean(("strategy",)), "strategies and conditional details must be valid"),
+        ("output_contract", clean(("output_contract_id",)), "phase output contract IDs must match"),
+        ("complexity", clean(("complexity",)), "PCP arithmetic, thresholds, and exceptions must be valid"),
+        ("quality_gates", clean(("quality gate",)), "all pre-dispatch quality gates must pass"),
+        ("security", clean(("sensitive", "sanitization", "secret", "PII")), "prompt text must be sanitized"),
+        ("attempt_lineage", clean(("attempt", "prompt_family")), "blocked attempt lineage must be bounded and linked"),
+        ("review_coverage", clean(("review",)), "reviewers must cover prompts and attempts"),
+        ("hash", clean(("sha256",)), "prompt hashes must match canonical text"),
+        ("complete", not errors, "all prompt contract checks must pass"),
+    ]
+    return _result(CRITERIA[10][0], CRITERIA[10][1], checks)
+
+
+def _metric_number(value: Any) -> Optional[float]:
+    """Convert a numeric PCP value to a stable JSON number."""
+
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return int(number) if number.is_integer() else round(number, 3)
+
+
+def _percentile(values: Sequence[float], fraction: float) -> Optional[float]:
+    if not values:
+        return None
+    ordered = sorted(values)
+    rank = max(0, min(len(ordered) - 1, math.ceil(fraction * len(ordered)) - 1))
+    return _metric_number(ordered[rank])
+
+
+def _prompt_metrics(trace: Any) -> Dict[str, Any]:
+    """Return descriptive prompt metrics; these never change the grade."""
+
+    trace = trace if isinstance(trace, dict) else {}
+    prompts = [item for item in _list(trace.get("prompts")) if isinstance(item, dict)]
+    attempts = [item for item in _list(trace.get("prompt_attempts")) if isinstance(item, dict)]
+    pcp_values: List[float] = []
+    warning_count = 0
+    exception_count = 0
+    strategy_counts: Dict[str, int] = {}
+    gate_failures: Dict[str, int] = {}
+    chain_aggregates: Dict[str, Dict[str, Any]] = {}
+
+    for record in prompts:
+        total = _metric_number(_mapping(record.get("complexity")).get("total"))
+        if total is not None:
+            pcp_values.append(float(total))
+            if total >= float(prompt_contract.PCP_WARNING_THRESHOLD):
+                warning_count += 1
+        if _mapping(record.get("complexity")).get("exception") is not None:
+            exception_count += 1
+        strategy = record.get("strategy")
+        if isinstance(strategy, str):
+            strategy_counts[strategy] = strategy_counts.get(strategy, 0) + 1
+        gates = _mapping(record.get("quality_gates"))
+        for gate_id, gate in gates.items():
+            if isinstance(gate, dict) and gate.get("status") == "fail":
+                gate_failures[gate_id] = gate_failures.get(gate_id, 0) + 1
+        details = _mapping(record.get("strategy_details"))
+        chain_id = details.get("chain_id")
+        if strategy == "chained" and isinstance(chain_id, str) and chain_id:
+            aggregate = chain_aggregates.setdefault(
+                chain_id,
+                {"prompt_count": 0, "pcp_total": 0, "max_pcp": None},
+            )
+            aggregate["prompt_count"] += 1
+            if total is not None:
+                aggregate["pcp_total"] = _metric_number(aggregate["pcp_total"] + total) or 0
+                aggregate["max_pcp"] = (
+                    total
+                    if aggregate["max_pcp"] is None
+                    else max(aggregate["max_pcp"], total)
+                )
+
+    repair_count = sum(
+        1
+        for event in _list(trace.get("events"))
+        if isinstance(event, dict) and event.get("kind") == "repair"
+    )
+    average = _metric_number(sum(pcp_values) / len(pcp_values)) if pcp_values else None
+    return {
+        "prompt_count": len(prompts),
+        "attempt_count": len(attempts),
+        "repair_count": repair_count,
+        "pcp": {
+            "total": _metric_number(sum(pcp_values)) if pcp_values else 0,
+            "average": average,
+            "max": _metric_number(max(pcp_values)) if pcp_values else None,
+            "p50": _percentile(pcp_values, 0.50),
+            "p95": _percentile(pcp_values, 0.95),
+            "warnings": warning_count,
+            "exceptions": exception_count,
+        },
+        "strategy_counts": dict(sorted(strategy_counts.items())),
+        "gate_failures": dict(sorted(gate_failures.items())),
+        "chain_aggregates": dict(sorted(chain_aggregates.items())),
+    }
+
+
+def _aggregate_prompt_metrics(results: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Aggregate additive report metrics without affecting expectations."""
+
+    prompt_count = 0
+    attempt_count = 0
+    repair_count = 0
+    pcp_total = 0.0
+    pcp_values: List[float] = []
+    warnings = 0
+    exceptions = 0
+    strategy_counts: Dict[str, int] = {}
+    gate_failures: Dict[str, int] = {}
+    for result in results:
+        metrics = _mapping(result.get("metrics"))
+        prompt_count += int(metrics.get("prompt_count", 0))
+        attempt_count += int(metrics.get("attempt_count", 0))
+        repair_count += int(metrics.get("repair_count", 0))
+        pcp = _mapping(metrics.get("pcp"))
+        warnings += int(pcp.get("warnings", 0))
+        exceptions += int(pcp.get("exceptions", 0))
+        maximum = pcp.get("max")
+        if isinstance(maximum, (int, float)):
+            pcp_values.extend(
+                [float(maximum)] * int(metrics.get("prompt_count", 0))
+            )
+        total = pcp.get("total")
+        if isinstance(total, (int, float)):
+            pcp_total += float(total)
+        else:
+            average = pcp.get("average")
+            if isinstance(average, (int, float)):
+                pcp_total += float(average) * int(metrics.get("prompt_count", 0))
+        for key, value in _mapping(metrics.get("strategy_counts")).items():
+            if isinstance(value, int):
+                strategy_counts[key] = strategy_counts.get(key, 0) + value
+        for key, value in _mapping(metrics.get("gate_failures")).items():
+            if isinstance(value, int):
+                gate_failures[key] = gate_failures.get(key, 0) + value
+    return {
+        "trace_count": len(results),
+        "prompt_count": prompt_count,
+        "attempt_count": attempt_count,
+        "repair_count": repair_count,
+        "pcp_total": _metric_number(pcp_total),
+        "pcp_average": _metric_number(pcp_total / prompt_count) if prompt_count else None,
+        "pcp_max": _metric_number(max(pcp_values)) if pcp_values else None,
+        "pcp_warnings": warnings,
+        "pcp_exceptions": exceptions,
+        "strategy_counts": dict(sorted(strategy_counts.items())),
+        "gate_failures": dict(sorted(gate_failures.items())),
+    }
+
+
 def grade_trace(trace: Dict[str, Any], source: str = "") -> Dict[str, Any]:
     errors = validate_trace(trace)
     if errors:
@@ -1590,11 +1808,12 @@ def grade_trace(trace: Dict[str, Any], source: str = "") -> Dict[str, Any]:
             "schema_valid": False,
             "schema_errors": errors,
             "score": 0,
-            "max_score": 100,
+            "max_score": MAX_SCORE,
             "grade": "D",
             "decision": "REJECT",
             "criteria": criteria,
             "failed_criteria": [item["id"] for item in criteria],
+            "metrics": _prompt_metrics(trace),
         }
     criteria = [
         _grade_context(trace),
@@ -1607,21 +1826,23 @@ def grade_trace(trace: Dict[str, Any], source: str = "") -> Dict[str, Any]:
         _grade_repair(trace),
         _grade_completion(trace),
         _grade_escalation(trace),
+        _grade_prompt_contract(trace),
     ]
     score = sum(item["earned_points"] for item in criteria)
-    accepted = score == 100 and all(item["status"] == "pass" for item in criteria)
-    grade = "A" if accepted else ("B" if score >= 90 else ("C" if score >= 75 else "D"))
+    accepted = score == MAX_SCORE and all(item["status"] == "pass" for item in criteria)
+    grade = "A" if accepted else ("B" if score >= MAX_SCORE * 0.9 else ("C" if score >= MAX_SCORE * 0.75 else "D"))
     return {
         "trace_id": trace.get("trace_id", source),
         "source": source,
         "schema_valid": True,
         "schema_errors": [],
         "score": score,
-        "max_score": 100,
+        "max_score": MAX_SCORE,
         "grade": grade,
         "decision": "ACCEPT" if accepted else "REJECT",
         "criteria": criteria,
         "failed_criteria": [item["id"] for item in criteria if item["status"] != "pass"],
+        "metrics": _prompt_metrics(trace),
     }
 
 
@@ -1635,11 +1856,12 @@ def grade_file(path: Path) -> Dict[str, Any]:
             "schema_valid": False,
             "schema_errors": [str(exc)],
             "score": 0,
-            "max_score": 100,
+            "max_score": MAX_SCORE,
             "grade": "D",
             "decision": "REJECT",
             "criteria": [_failed_result(cid, label, "load: " + str(exc)) for cid, label in CRITERIA],
             "failed_criteria": [cid for cid, _ in CRITERIA],
+            "metrics": _prompt_metrics({}),
         }
 
 
@@ -1647,7 +1869,7 @@ def format_result(result: Dict[str, Any], expected: str = "") -> str:
     expectation = (" expected=" + expected) if expected else ""
     lines = [
         "%s | %s | score %d/%d | grade %s%s"
-        % (result.get("decision"), result.get("trace_id"), result.get("score", 0), result.get("max_score", 100), result.get("grade", "D"), expectation),
+        % (result.get("decision"), result.get("trace_id"), result.get("score", 0), result.get("max_score", MAX_SCORE), result.get("grade", "D"), expectation),
     ]
     if not result.get("schema_valid"):
         lines.append("  schema: INVALID - " + "; ".join(result.get("schema_errors", [])))
@@ -1717,13 +1939,13 @@ def _expectation(trace: Optional[Dict[str, Any]], result: Dict[str, Any]) -> Dic
             % (effective_decision, result.get("decision", "REJECT"))
         )
 
-    # An ACCEPT result is always required to be a complete 100/A result.  Keep
+    # An ACCEPT result is always required to be a complete max/A result.  Keep
     # this check independent from expectation metadata so expected failures
     # cannot turn a partial or inconsistent pass into a successful run.
     if result.get("decision") == "ACCEPT" and (
-        result.get("score") != 100 or result.get("grade") != "A"
+        result.get("score") != result.get("max_score") or result.get("grade") != "A"
     ):
-        failures.append("an acceptable trace must have score 100 and grade A")
+        failures.append("an acceptable trace must have the maximum score and grade A")
 
     return {
         "expected_decision": expected_decision if has_decision else None,
@@ -1755,8 +1977,8 @@ def _report_payload(traces_dir: Path, results: List[Dict[str, Any]], error: str 
         all(result.get("expectation", {}).get("passed") is True for result in results),
         all(
             result.get("decision") != "ACCEPT"
-            or (result.get("score") == 100 and result.get("grade") == "A")
-            for result in results
+            or (result.get("score") == result.get("max_score") and result.get("grade") == "A")
+        for result in results
         ),
     ]
     payload: Dict[str, Any] = {
@@ -1764,6 +1986,7 @@ def _report_payload(traces_dir: Path, results: List[Dict[str, Any]], error: str 
         "trace_directory": str(traces_dir),
         "count": len(results),
         "results": results,
+        "metrics": _aggregate_prompt_metrics(results),
     }
     if error:
         payload["error"] = error
@@ -1775,6 +1998,19 @@ def _format_report(payload: Dict[str, Any]) -> str:
         "TRACE DIRECTORY: %s" % payload["trace_directory"],
         "TRACES: %d" % payload["count"],
     ]
+    metrics = _mapping(payload.get("metrics"))
+    lines.append(
+        "METRICS: prompts=%d attempts=%d pcp_avg=%s pcp_max=%s warnings=%d exceptions=%d repairs=%d"
+        % (
+            metrics.get("prompt_count", 0),
+            metrics.get("attempt_count", 0),
+            metrics.get("pcp_average"),
+            metrics.get("pcp_max"),
+            metrics.get("pcp_warnings", 0),
+            metrics.get("pcp_exceptions", 0),
+            metrics.get("repair_count", 0),
+        )
+    )
     if payload.get("error"):
         lines.append("ERROR: " + payload["error"])
     for result in payload.get("results", []):

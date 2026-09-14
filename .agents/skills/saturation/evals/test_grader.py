@@ -8,6 +8,7 @@ EVALS_DIR = Path(__file__).resolve().parent
 TRACES_DIR = EVALS_DIR / "traces"
 sys.path.insert(0, str(EVALS_DIR))
 import grader  # noqa: E402
+import prompt_contract  # noqa: E402
 
 
 class GraderTests(unittest.TestCase):
@@ -43,12 +44,15 @@ class GraderTests(unittest.TestCase):
             call for call in trace["tool_calls"] if call["call_id"] == call_id
         )
 
-    def test_complete_is_accept_100_a(self):
+    def test_complete_is_accept_110_a(self):
         result = self.grade("complete.json")
         self.assertEqual(
             (result["decision"], result["score"], result["grade"]),
-            ("ACCEPT", 100, "A"),
+            ("ACCEPT", 110, "A"),
         )
+        self.assertEqual(result["metrics"]["prompt_count"], 5)
+        self.assertEqual(result["metrics"]["pcp"]["average"], 3)
+        self.assertEqual(result["metrics"]["strategy_counts"], {"direct": 5})
 
     def test_all_regressions_are_rejected_with_exact_targets(self):
         fixtures = [
@@ -177,7 +181,7 @@ class GraderTests(unittest.TestCase):
         def mutation(trace):
             self.event(trace, "E-003")["payload"]["tool_call_ref"] = "C-missing"
 
-        self.assert_failed(mutation, ["evidence"])
+        self.assert_failed(mutation, ["evidence", "prompt_contract"])
 
     def test_unrelated_handoff_evidence_source(self):
         def mutation(trace):
@@ -237,7 +241,7 @@ class GraderTests(unittest.TestCase):
         def mutation(trace):
             self.event(trace, "E-005")["payload"]["handoff_ref"] = "E-002"
 
-        self.assert_failed(mutation, ["handoff_payload"])
+        self.assert_failed(mutation, ["handoff_payload", "prompt_contract"])
 
     def test_missing_verifier_dimension(self):
         def mutation(trace):
@@ -267,8 +271,144 @@ class GraderTests(unittest.TestCase):
         result = grader.grade_trace(trace, "optional-not-applicable")
         self.assertEqual(
             (result["decision"], result["score"], result["grade"]),
-            ("ACCEPT", 100, "A"),
+            ("ACCEPT", 110, "A"),
         )
+
+    def test_prompt_normalization_and_hash_are_deterministic(self):
+        text = "\r\n  ## Role  \r\nvalue\t\r\n\r\n"
+        normalized = prompt_contract.normalize_prompt(text)
+        self.assertEqual(normalized, "  ## Role\nvalue\n")
+        self.assertEqual(
+            prompt_contract.prompt_sha256(text),
+            prompt_contract.prompt_sha256(normalized),
+        )
+
+    def test_prompt_heading_mutation_is_rejected(self):
+        def mutation(trace):
+            prompt = trace["prompts"][0]
+            prompt["rendered_prompt"] = prompt["rendered_prompt"].replace(
+                "## Role", "# Role", 1
+            )
+
+        self.assert_failed(mutation, ["prompt_contract"])
+
+    def test_prompt_hash_mutation_is_rejected(self):
+        def mutation(trace):
+            trace["prompts"][0]["normalized_sha256"] = "0" * 64
+
+        self.assert_failed(mutation, ["prompt_contract"])
+
+    def test_prompt_output_contract_must_be_rendered(self):
+        def mutation(trace):
+            prompt = trace["prompts"][0]
+            prompt["rendered_prompt"] = prompt["rendered_prompt"].replace(
+                "handoff_ref", "handoff_reference", 1
+            )
+
+        self.assert_failed(mutation, ["prompt_contract"])
+
+    def test_prompt_pcp_arithmetic_mutation_is_rejected(self):
+        def mutation(trace):
+            trace["prompts"][0]["complexity"]["total"] = 4
+
+        self.assert_failed(mutation, ["prompt_contract"])
+
+    def test_prompt_reverse_tool_link_mutation_is_rejected(self):
+        def mutation(trace):
+            self.call(trace, "C-003")["prompt_id"] = None
+
+        self.assert_failed(mutation, ["prompt_contract"])
+
+    def test_prompt_untrusted_boundary_mutation_is_rejected(self):
+        def mutation(trace):
+            prompt = trace["prompts"][0]
+            prompt["rendered_prompt"] = prompt["rendered_prompt"].replace(
+                "[END UNTRUSTED REPOSITORY CONTEXT]",
+                "[END UNTRUSTED OTHER CONTEXT]",
+                1,
+            )
+
+        self.assert_failed(mutation, ["prompt_contract"])
+
+    def test_prompt_strategy_requires_its_quality_gate(self):
+        def mutation(trace):
+            prompt = trace["prompts"][0]
+            prompt["strategy"] = "few_shot"
+            prompt["strategy_details"] = {"examples_count": 1}
+
+        self.assert_failed(mutation, ["prompt_contract"])
+
+    def test_prompt_chain_dependency_must_be_observable_and_prior(self):
+        def mutation(trace):
+            prompt = trace["prompts"][0]
+            prompt["strategy"] = "chained"
+            prompt["strategy_details"] = {
+                "chain_id": "CHAIN-1",
+                "step_index": 2,
+                "depends_on_prompt_ids": ["P-missing"],
+            }
+
+        self.assert_failed(mutation, ["prompt_contract"])
+
+    def test_tool_augmented_prompt_must_match_external_action(self):
+        def mutation(trace):
+            prompt = trace["prompts"][0]
+            prompt["strategy"] = "tool_augmented"
+            prompt["strategy_details"] = {"tools": ["other_tool"]}
+            prompt["complexity"]["items"].append({
+                "id": "pcp-external",
+                "kind": "external_dependency",
+                "section": "Procedure",
+                "description": "Call the observable implementation tool.",
+                "count": 1,
+            })
+            prompt["complexity"]["total"] = 3.5
+
+        self.assert_failed(mutation, ["prompt_contract"])
+
+    def test_prompt_attempt_limit_is_rejected(self):
+        source = copy.deepcopy(self.complete["prompts"][0])
+        attempts = []
+        for index in range(1, 5):
+            attempt = {
+                "attempt_id": "A-PROMPT-%d" % index,
+                "prompt_family_id": "F-001-implement",
+                "handoff_event_id": "E-002",
+                "previous_attempt_id": None if index == 1 else "A-PROMPT-%d" % (index - 1),
+                "rendered_prompt": source["rendered_prompt"],
+                "normalized_sha256": source["normalized_sha256"],
+                "modules": copy.deepcopy(source["modules"]),
+                "language": source["language"],
+                "sections": copy.deepcopy(source["sections"]),
+                "strategy": source["strategy"],
+                "strategy_details": copy.deepcopy(source["strategy_details"]),
+                "strategy_reason": source["strategy_reason"],
+                "selection_evidence": copy.deepcopy(source["selection_evidence"]),
+                "output_contract_id": source["output_contract_id"],
+                "complexity": copy.deepcopy(source["complexity"]),
+                "quality_gates": copy.deepcopy(source["quality_gates"]),
+                "failure_codes": ["G-PROMPT-TEST"],
+                "evidence": ["EV-inspect"],
+            }
+            attempts.append(attempt)
+
+        def mutation(trace):
+            trace["prompt_attempts"] = attempts
+
+        self.assert_failed(mutation, ["prompt_contract"])
+
+    def test_prompt_sensitive_values_are_redacted(self):
+        raw = "email=user@example.com token=Bearer abcdefghijklmnop"
+        self.assertEqual(prompt_contract.scan_sensitive(raw), ["bearer_token", "email"])
+        self.assertNotIn("user@example.com", prompt_contract.sanitize_prompt(raw))
+
+    def test_malformed_prompt_values_are_rejected_without_crashing(self):
+        for field in ("complexity", "rendered_prompt", "quality_gates"):
+            with self.subTest(field=field):
+                def mutation(trace, field=field):
+                    trace["prompts"][0][field] = []
+
+                self.assert_failed(mutation, ["prompt_contract"])
 
     def test_missing_verifier_criterion(self):
         def mutation(trace):

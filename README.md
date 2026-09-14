@@ -9,17 +9,24 @@ Saturation is a Codex skill for orchestrating implementation work through fresh,
 - Fresh sessions for implementation, review, and verification.
 - Adversarial, read-only review before promotion.
 - A deterministic evaluation suite for catching workflow regressions.
+- A canonical prompt policy with modular composition, PCP complexity budgets,
+  quality gates, and traceable prompt evidence.
 
 ## Workflow
 
-1. Freeze the active context in `.saturation/context.md` before delegation.
+1. Read the modular prompt and code-style guides, then freeze the active
+   context in `.saturation/context.md` before delegation.
 2. Split the work into disjoint assignments with explicit read and write scopes.
-3. Implement the assignments in fresh sessions and return structured handoffs.
-4. Review the result with a fresh, adversarial, read-only reviewer.
-5. Repair every material gap and verify the repair independently.
-6. Promote the result only after the final review and all completion gates pass.
+3. Compose, lint, and record each operational prompt before dispatch.
+4. Implement the assignments in fresh sessions and return structured handoffs.
+5. Review the result and its prompts with a fresh, adversarial, read-only reviewer.
+6. Repair every material gap and verify the repair independently.
+7. Promote the result only after the final review and all completion gates pass.
 
 Scope changes, conflicts, real-world effects, and unresolved blockers must be escalated instead of being silently absorbed.
+
+Assignments may read and write explicitly scoped product paths; the synthetic
+trace fixtures use a narrower, self-contained read boundary only for testing.
 
 ## At a glance
 
@@ -28,7 +35,7 @@ The frozen context and style guide feed the orchestration rules. Work then moves
 ```mermaid
 flowchart TD
     C[".saturation/context.md<br/>Frozen run context"] --> S["SKILL.md<br/>Orchestration rules"]
-    G["code_styleguides/SKILL.md"] --> S
+    G["code_styleguides/prompting.md<br/>general.md<br/>language modules"] --> S
     M["agents/openai.yaml<br/>Metadata and default prompt"] --> S
 
     S --> F["Freeze context"]
@@ -56,8 +63,13 @@ flowchart TD
 .agents/skills/saturation/
 ├── SKILL.md                    # Core skill instructions
 ├── agents/openai.yaml          # Display metadata and default prompt
-├── code_styleguides/SKILL.md   # Coding guidance used by the skill
+├── code_styleguides/
+│   ├── README.md               # Module index and selection order
+│   ├── prompting.md            # Prompt construction and prompt trace policy
+│   ├── general.md              # Cross-language structural design
+│   └── <language>.md           # Language-specific guidance
 └── evals/
+    ├── prompt_contract.py      # Prompt contract and PCP validator
     ├── grader.py               # Trace schema and behavioral grader
     ├── report.py               # Portable command-line entry point
     ├── rubric.json             # Grading criteria and fixture matrix
@@ -81,11 +93,19 @@ The skill reads the current session context, freezes it in `.saturation/context.
 The evaluation suite uses only the Python standard library. From the repository root, run:
 
 ```text
+python .agents/skills/saturation/evals/prompt_contract.py --trace .agents/skills/saturation/evals/traces/complete.json --root .
 python .agents/skills/saturation/evals/report.py
 python .agents/skills/saturation/evals/test_grader.py
 ```
 
-The report grades the checked-in synthetic traces and exits successfully only when the valid trace reaches 100/A and every regression fixture is rejected for its intended reason. Use `--json` for machine-readable output or `--traces DIR` to grade another directory of direct JSON trace files.
+The report grades the checked-in synthetic traces and exits successfully only
+when the valid trace reaches 110/A and every regression fixture is rejected for
+its intended reason. Use `--json` for machine-readable output or `--traces DIR`
+to grade another directory of direct JSON trace files. Prompt-aware traces use
+schema v3 and include rendered prompt evidence, strict module manifests, PCP,
+and quality gates. The prompt validator can independently verify the canonical
+prompt contract and module hashes; the report also emits descriptive PCP,
+strategy, gate, attempt, and repair metrics that do not alter acceptance.
 
 ## Contributing
 
