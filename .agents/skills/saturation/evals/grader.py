@@ -9,11 +9,15 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 2
+SUPPORTED_SCHEMA_VERSIONS = {CURRENT_SCHEMA_VERSION}
 EXPECTED_WRITE_ROOT = ".agents/skills/saturation/evals"
 CONTEXT_PATH = ".saturation/context.md"
+EXPECTED_READ_ROOTS = (CONTEXT_PATH, EXPECTED_WRITE_ROOT)
 EVENT_KINDS = {
     "context_frozen",
+    "inspection",
     "handoff",
     "implementation",
     "review",
@@ -30,6 +34,7 @@ TOOL_PHASES = {
     "repair",
     "verify",
     "promote",
+    "completion_gate",
 }
 EVIDENCE_KINDS = {
     "read",
@@ -43,6 +48,74 @@ EVIDENCE_KINDS = {
 }
 RISK_KINDS = {"scope_conflict", "quality_change", "data_effect", "blocker"}
 READ_ONLY_ROLES = {"reviewer", "verifier"}
+
+# Schema v2 fixes the handoff, verifier, sequence, and reverse-link contracts;
+# missing fields cannot be mistaken for a successful delivery or verification.
+HANDOFF_INPUT_FIELDS = ("context", "assignment", "state", "input", "output", "error", "stop", "evidence", "fresh_session")
+HANDOFF_ASSIGNMENT_FIELDS = ("id", "owner_actor_id", "read_scope", "write_scope")
+HANDOFF_OUTPUT_FIELDS = (
+    "status",
+    "event_ref",
+    "changed_paths",
+    "verification_evidence",
+    "unresolved_risks",
+    "evidence",
+)
+HANDOFF_ERROR_FIELDS = ("code", "message", "retryable", "escalate", "evidence")
+HANDOFF_OUTPUT_STATUSES = {"complete", "needs_repair", "blocked"}
+HANDOFF_PHASES = {"implement", "review", "repair", "verify", "final_review"}
+HANDOFF_STATE_STATUSES = {"ready", "running", "needs_repair", "verified", "blocked"}
+HANDOFF_STATE_DECISIONS = {
+    "continue",
+    "repair",
+    "verify",
+    "promote",
+    "escalate",
+    "complete",
+    "reject",
+}
+BASE_VERIFIER_DIMENSIONS = ("completeness", "clarity", "consistency", "testability")
+OPTIONAL_VERIFIER_DIMENSIONS = ("behavior", "error_handling", "task_completion")
+VERIFIER_DIMENSIONS = BASE_VERIFIER_DIMENSIONS + OPTIONAL_VERIFIER_DIMENSIONS
+VERIFIER_RESULTS = {"pass", "fail", "not_applicable"}
+
+EVENT_TOOL_PHASES = {
+    "context_frozen": "freeze_context",
+    "inspection": "inspect",
+    "implementation": "implement",
+    "review": "review",
+    "repair": "repair",
+    "verify": "verify",
+    "promotion": "promote",
+    "completion_gate": "completion_gate",
+}
+TOOL_PHASE_ROLES = {
+    "freeze_context": "orchestrator",
+    "inspect": "orchestrator",
+    "implement": "implementer",
+    "review": "reviewer",
+    "repair": "repairer",
+    "verify": "verifier",
+    "promote": "orchestrator",
+    "completion_gate": "orchestrator",
+}
+HANDOFF_TARGET_KINDS = {
+    "implement": "implementation",
+    "review": "review",
+    "repair": "repair",
+    "verify": "verify",
+    "final_review": "review",
+}
+EVIDENCE_SOURCE_KINDS = {
+    "read": {"context_frozen", "inspection", "freeze_context", "inspect"},
+    "handoff": {"handoff"},
+    "diff": {"implementation", "repair", "promotion", "implement", "repair", "promote"},
+    "review": {"review"},
+    "verification": {"verify"},
+    "promotion": {"promotion", "promote"},
+    "gate": {"completion_gate"},
+    "test": {"inspection", "verify", "inspect", "verification"},
+}
 
 CRITERIA = (
     ("context_freeze", "contexto congelado antes da delegação"),
@@ -74,6 +147,32 @@ def _nonempty_string(value: Any) -> bool:
 
 def _list(value: Any) -> List[Any]:
     return value if isinstance(value, list) else []
+
+
+def _mapping(value: Any) -> Dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _string_ids(value: Any, *, nonempty: bool = False) -> List[str]:
+    values = _list(value)
+    result = [item for item in values if isinstance(item, str)]
+    if nonempty and (not isinstance(value, list) or len(result) != len(values)):
+        return []
+    if nonempty and any(not item.strip() for item in result):
+        return []
+    return result
+
+
+def _id_set(value: Any) -> set:
+    return set(_string_ids(value, nonempty=True))
+
+
+def _strict_contract(trace: Dict[str, Any]) -> bool:
+    return trace.get("schema_version") == CURRENT_SCHEMA_VERSION
+
+
+def _contract(trace: Dict[str, Any]) -> Dict[str, Any]:
+    return _mapping(trace.get("trace_contract"))
 
 
 def _actor(trace: Dict[str, Any], actor_id: Any) -> Dict[str, Any]:
@@ -109,6 +208,8 @@ def _tools(trace: Dict[str, Any], phase: Optional[str] = None) -> List[Tuple[int
 def _id_map(items: Iterable[Dict[str, Any]], key: str) -> Dict[str, Dict[str, Any]]:
     result = {}
     for item in items:
+        if not isinstance(item, dict):
+            continue
         value = item.get(key)
         if isinstance(value, str):
             result[value] = item
@@ -136,6 +237,23 @@ def _check_scope(paths: Any, root: str = EXPECTED_WRITE_ROOT) -> bool:
     return isinstance(paths, list) and all(_inside(path, root) for path in paths)
 
 
+def _check_read_scope(paths: Any) -> bool:
+    """Require unique, normalized read roots inside context or evals."""
+
+    if not isinstance(paths, list) or len(paths) != len(set(_string_ids(paths))):
+        return False
+    return all(
+        _normal_path(path) == path
+        and any(_inside(path, root) for root in EXPECTED_READ_ROOTS)
+        for path in paths
+    )
+
+
+def _declared_verifier_dimensions(trace: Dict[str, Any]) -> List[str]:
+    dimensions = _mapping(_contract(trace).get("verifier")).get("dimensions")
+    return _string_ids(dimensions, nonempty=True)
+
+
 def _source_map(trace: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     result = {}
     for item in _list(trace.get("events")) + _list(trace.get("tool_calls")):
@@ -146,14 +264,127 @@ def _source_map(trace: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     return result
 
 
+def _event_map(trace: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    return _id_map(_list(trace.get("events")), "event_id")
+
+
+def _call_map(trace: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    return _id_map(_list(trace.get("tool_calls")), "call_id")
+
+
+def _source_position(trace: Dict[str, Any], source_id: Any) -> Optional[int]:
+    """Return an event-order position for an observable source when possible."""
+
+    for index, event in _events(trace):
+        if event.get("event_id") == source_id:
+            return index
+    for _, call in _tools(trace):
+        if call.get("call_id") != source_id:
+            continue
+        event_ref = call.get("event_ref")
+        if isinstance(event_ref, str):
+            for index, event in _events(trace):
+                if event.get("event_id") == event_ref:
+                    return index
+        linked = _linked_call_event(trace, call)
+        if linked is not None:
+            return linked[0]
+        return None
+    return None
+
+
+def _evidence_position(trace: Dict[str, Any], evidence_id: Any) -> Optional[int]:
+    for record in _list(trace.get("evidence")):
+        if isinstance(record, dict) and record.get("evidence_id") == evidence_id:
+            return _source_position(trace, record.get("source_id"))
+    return None
+
+
+def _linked_call_event(
+    trace: Dict[str, Any], call: Dict[str, Any]
+) -> Optional[Tuple[int, Dict[str, Any]]]:
+    """Find the event causally paired with a tool call."""
+
+    event_ref = call.get("event_ref")
+    if isinstance(event_ref, str):
+        for index, event in _events(trace):
+            if event.get("event_id") == event_ref:
+                return index, event
+        return None
+    call_id = call.get("call_id")
+    if not isinstance(call_id, str):
+        return None
+    matches = [
+        (index, event)
+        for index, event in _events(trace)
+        if _payload(event).get("tool_call_ref") == call_id
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _contract_declaration_errors(trace: Dict[str, Any]) -> List[str]:
+    """Validate the fixed v2 declaration without inspecting event semantics."""
+
+    if "trace_contract" not in trace:
+        return ["schema_version 2 requires trace_contract"]
+    declaration = trace.get("trace_contract")
+    if not isinstance(declaration, dict):
+        return ["trace_contract must be an object"]
+
+    errors: List[str] = []
+    if declaration.get("version") != CURRENT_SCHEMA_VERSION:
+        errors.append("trace_contract.version must be 2")
+    if declaration.get("causal_links") != "bidirectional":
+        errors.append("trace_contract.causal_links must be bidirectional")
+
+    handoff = declaration.get("handoff")
+    if not isinstance(handoff, dict):
+        errors.append("trace_contract.handoff must be an object")
+    else:
+        expected_handoff = {
+            "input_fields": list(HANDOFF_INPUT_FIELDS),
+            "assignment_fields": list(HANDOFF_ASSIGNMENT_FIELDS),
+            "output_fields": list(HANDOFF_OUTPUT_FIELDS),
+            "error_fields": list(HANDOFF_ERROR_FIELDS),
+        }
+        if set(handoff) != set(expected_handoff):
+            errors.append("trace_contract.handoff must contain only the fixed contract fields")
+        for field, expected in expected_handoff.items():
+            if handoff.get(field) != expected:
+                errors.append("trace_contract.handoff.%s is not the fixed contract" % field)
+
+    verifier = declaration.get("verifier")
+    if not isinstance(verifier, dict):
+        errors.append("trace_contract.verifier must be an object")
+    else:
+        dimensions = verifier.get("dimensions")
+        optional = [
+            dimension
+            for dimension in OPTIONAL_VERIFIER_DIMENSIONS
+            if dimension in _string_ids(dimensions)
+        ]
+        expected_dimensions = list(BASE_VERIFIER_DIMENSIONS) + optional
+        expected_criteria = [criterion_id for criterion_id, _ in CRITERIA]
+        if set(verifier) != {"dimensions", "criteria"}:
+            errors.append("trace_contract.verifier must contain only dimensions and criteria")
+        if dimensions != expected_dimensions:
+            errors.append("trace_contract.verifier.dimensions must contain the base dimensions followed by declared optional dimensions")
+        if verifier.get("criteria") != expected_criteria:
+            errors.append("trace_contract.verifier.criteria are not the rubric criteria")
+    return errors
+
+
 def validate_trace(trace: Any) -> List[str]:
     """Return structural errors; behavioral defects are deliberately graded below."""
 
     errors: List[str] = []
     if not isinstance(trace, dict):
         return ["root must be an object"]
-    if trace.get("schema_version") != SCHEMA_VERSION:
-        errors.append("schema_version must be 1")
+    schema_version = trace.get("schema_version")
+    if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
+        errors.append("schema_version must be 2")
+    elif schema_version == CURRENT_SCHEMA_VERSION or "trace_contract" in trace:
+        errors.extend(_contract_declaration_errors(trace))
     for key in ("trace_id", "objective"):
         if not _nonempty_string(trace.get(key)):
             errors.append("missing non-empty %s" % key)
@@ -190,6 +421,10 @@ def validate_trace(trace: Any) -> List[str]:
             assignment_ids.add(assignment_id)
         if assignment.get("owner_actor_id") not in actors if isinstance(actors, dict) else True:
             errors.append("assignment has unknown owner_actor_id")
+        if set(assignment) != {"assignment_id", "owner_actor_id", "read_scope", "write_scope"}:
+            errors.append("assignment %s must contain the exact assignment contract" % assignment_id)
+        if not isinstance(assignment.get("read_scope"), list):
+            errors.append("assignment %s read_scope must be a list" % assignment_id)
         if not isinstance(assignment.get("write_scope"), list):
             errors.append("assignment %s write_scope must be a list" % assignment_id)
 
@@ -259,7 +494,8 @@ def validate_trace(trace: Any) -> List[str]:
             record_id = record.get("evidence_id")
             if not _nonempty_string(record_id) or record_id in evidence_ids:
                 errors.append("evidence ids must be non-empty and unique")
-            evidence_ids.add(record_id)
+            elif isinstance(record_id, str):
+                evidence_ids.add(record_id)
             if not _nonempty_string(record.get("source_id")):
                 errors.append("evidence %s has no source_id" % record_id)
             if record.get("kind") not in EVIDENCE_KINDS:
@@ -315,10 +551,327 @@ def _linked_call(trace: Dict[str, Any], event: Dict[str, Any]) -> Optional[Dict[
     call_id = _payload(event).get("tool_call_ref")
     if not isinstance(call_id, str):
         return None
-    for _, call in _tools(trace):
-        if call.get("call_id") == call_id:
-            return call
-    return None
+    return _call_map(trace).get(call_id)
+
+
+def _event_tool_links(trace: Dict[str, Any]) -> Tuple[bool, str]:
+    """Require one causally compatible tool call for every operational event."""
+
+    event_map = _event_map(trace)
+    call_map = _call_map(trace)
+    strict = _strict_contract(trace)
+    event_refs: Dict[str, List[str]] = {}
+    ok = True
+    detail = "event and tool calls must have exact phase, actor, and assignment links"
+
+    for event in event_map.values():
+        kind = event.get("kind")
+        phase = EVENT_TOOL_PHASES.get(kind)
+        if phase is None:
+            continue
+        ref = _payload(event).get("tool_call_ref")
+        call = call_map.get(ref) if isinstance(ref, str) else None
+        compatible = bool(call) and call.get("phase") == phase
+        compatible = compatible and call.get("actor_id") == event.get("actor_id")
+        compatible = compatible and call.get("assignment_id") == event.get("assignment_id")
+        compatible = compatible and call.get("reads") == event.get("reads")
+        compatible = compatible and call.get("writes") == event.get("writes")
+        if compatible:
+            event_refs.setdefault(ref, []).append(event.get("event_id"))
+        else:
+            ok = False
+
+    for call in call_map.values():
+        phase = call.get("phase")
+        if phase == "inspect" and not strict and "event_ref" not in call:
+            # The v1 fixtures contain an inspection call but no inspection
+            # event.  It remains grandfathered; all workflow-changing calls
+            # still need an exact reverse link in v1.
+            continue
+        if phase not in TOOL_PHASE_ROLES:
+            ok = False
+            continue
+        event_ref = call.get("event_ref")
+        linked_event: Optional[Dict[str, Any]] = (
+            event_map.get(event_ref) if isinstance(event_ref, str) and event_ref else None
+        )
+        if linked_event is None:
+            ok = False
+            continue
+        if (
+            linked_event.get("event_id") not in event_refs.get(call.get("call_id"), [])
+            or linked_event.get("actor_id") != call.get("actor_id")
+            or linked_event.get("kind") not in EVENT_TOOL_PHASES
+            or EVENT_TOOL_PHASES.get(linked_event.get("kind")) != phase
+            or linked_event.get("assignment_id") != call.get("assignment_id")
+            or linked_event.get("reads") != call.get("reads")
+            or linked_event.get("writes") != call.get("writes")
+        ):
+            ok = False
+
+    if any(len(refs) != 1 for refs in event_refs.values()):
+        ok = False
+    return ok, detail
+
+
+def _handoff_input(event: Dict[str, Any]) -> Dict[str, Any]:
+    return _payload(event)
+
+
+def _handoff_has_explicit_contract(event: Dict[str, Any]) -> bool:
+    payload = _payload(event)
+    return any(field in payload for field in ("input", "output", "error"))
+
+
+def _next_handoff_target(
+    trace: Dict[str, Any], index: int, event: Dict[str, Any]
+) -> Optional[Tuple[int, Dict[str, Any]]]:
+    input_payload = _handoff_input(event)
+    state = _mapping(input_payload.get("state"))
+    target_kind = HANDOFF_TARGET_KINDS.get(state.get("phase"))
+    target_actor = event.get("to_actor_id")
+    if target_kind is None or not isinstance(target_actor, str):
+        return None
+    candidates = [
+        (candidate_index, candidate)
+        for candidate_index, candidate in _events(trace)
+        if candidate_index > index
+        and candidate.get("kind") == target_kind
+        and candidate.get("actor_id") == target_actor
+    ]
+    return candidates[0] if candidates else None
+
+
+def _handoff_contract_values(
+    trace: Dict[str, Any], index: int, event: Dict[str, Any]
+) -> Tuple[Dict[str, Any], Any, Any, Optional[Tuple[int, Dict[str, Any]]], bool]:
+    """Return the declared input/output/error and resolved target."""
+
+    payload = _payload(event)
+    explicit = _handoff_has_explicit_contract(event)
+    input_payload = _handoff_input(event)
+    target = _next_handoff_target(trace, index, event)
+    output = payload.get("output")
+    error = payload.get("error")
+    return input_payload, output, error, target, explicit
+
+
+def _valid_handoff_input(
+    trace: Dict[str, Any], event: Dict[str, Any], input_payload: Any, evidence_ids: set
+) -> bool:
+    if not isinstance(input_payload, dict):
+        return False
+    if any(field not in input_payload for field in ("context", "assignment", "state", "input", "output", "error", "stop", "evidence", "fresh_session")):
+        return False
+    context = _mapping(input_payload.get("context"))
+    assignment = _mapping(input_payload.get("assignment"))
+    state = _mapping(input_payload.get("state"))
+    task_input = _mapping(input_payload.get("input"))
+    evidence = _string_ids(input_payload.get("evidence"), nonempty=True)
+    registered_assignment = _id_map(
+        _list(trace.get("assignments")), "assignment_id"
+    ).get(assignment.get("id"), {})
+    return (
+        set(input_payload) == set(HANDOFF_INPUT_FIELDS)
+        and set(context) == {"path", "frozen"}
+        and context.get("path") == CONTEXT_PATH
+        and context.get("frozen") is True
+        and set(assignment) == set(HANDOFF_ASSIGNMENT_FIELDS)
+        and assignment
+        == {
+            "id": registered_assignment.get("assignment_id"),
+            "owner_actor_id": registered_assignment.get("owner_actor_id"),
+            "read_scope": registered_assignment.get("read_scope"),
+            "write_scope": registered_assignment.get("write_scope"),
+        }
+        and set(state) == {"phase", "status", "decision"}
+        and state.get("phase") in HANDOFF_PHASES
+        and state.get("status") in HANDOFF_STATE_STATUSES
+        and state.get("decision") in HANDOFF_STATE_DECISIONS
+        and set(task_input) == {"objective", "scope", "acceptance", "constraints"}
+        and _nonempty_string(task_input.get("objective"))
+        and all(
+            _string_ids(task_input.get(key), nonempty=True) == task_input.get(key)
+            for key in ("scope", "acceptance", "constraints")
+        )
+        and input_payload.get("fresh_session") is True
+        and bool(evidence)
+        and set(evidence) <= evidence_ids
+    )
+
+
+def _valid_handoff_error(error: Any, evidence_ids: set) -> bool:
+    if error is None:
+        return True
+    if not isinstance(error, dict):
+        return False
+    if set(error) != set(HANDOFF_ERROR_FIELDS):
+        return False
+    return (
+        _nonempty_string(error.get("code"))
+        and _nonempty_string(error.get("message"))
+        and isinstance(error.get("retryable"), bool)
+        and isinstance(error.get("escalate"), bool)
+        and bool(_string_ids(error.get("evidence"), nonempty=True))
+        and set(_string_ids(error.get("evidence"), nonempty=True)) <= evidence_ids
+    )
+
+
+def _valid_handoff_stop(stop: Any, evidence_ids: set) -> bool:
+    if stop is None:
+        return True
+    if not isinstance(stop, dict) or set(stop) != {"required", "reason", "evidence"}:
+        return False
+    refs = _string_ids(stop.get("evidence"), nonempty=True)
+    return (
+        stop.get("required") is True
+        and _nonempty_string(stop.get("reason"))
+        and bool(refs)
+        and set(refs) <= evidence_ids
+    )
+
+
+def _valid_handoff_output(
+    trace: Dict[str, Any],
+    event: Dict[str, Any],
+    output: Any,
+    error: Any,
+    target: Optional[Tuple[int, Dict[str, Any]]],
+    evidence_ids: set,
+    explicit: bool,
+) -> bool:
+    if not isinstance(output, dict):
+        return False
+    if set(output) != set(HANDOFF_OUTPUT_FIELDS):
+        return False
+    output_evidence = _string_ids(output.get("evidence"), nonempty=True)
+    if not output_evidence or not set(output_evidence) <= evidence_ids:
+        return False
+    verification_evidence = _string_ids(
+        output.get("verification_evidence"), nonempty=True
+    )
+    if (
+        verification_evidence != output.get("verification_evidence")
+        or not set(verification_evidence) <= evidence_ids
+    ):
+        return False
+    changed_paths = _string_ids(output.get("changed_paths"), nonempty=True)
+    unresolved_risks = _string_ids(output.get("unresolved_risks"), nonempty=True)
+    if (
+        changed_paths != output.get("changed_paths")
+        or unresolved_risks != output.get("unresolved_risks")
+        or any(_normal_path(path) != path for path in changed_paths)
+    ):
+        return False
+    if target is None or output.get("event_ref") != target[1].get("event_id"):
+        return False
+    if changed_paths != _list(target[1].get("writes")):
+        return False
+    status = output.get("status")
+    if status not in HANDOFF_OUTPUT_STATUSES:
+        return False
+    if set(output_evidence) - set(_string_ids(event.get("evidence"), nonempty=True)):
+        return False
+    if status == "complete":
+        return error is None and not unresolved_risks
+    if status == "needs_repair":
+        return error is None and bool(unresolved_risks)
+    return (
+        isinstance(error, dict)
+        and _valid_handoff_error(error, evidence_ids)
+        and bool(unresolved_risks)
+    )
+
+
+def _lifecycle_phase(
+    trace: Dict[str, Any], item: Dict[str, Any], review_number: Dict[str, int]
+) -> Optional[str]:
+    """Resolve an event/call to its phase in the merged lifecycle."""
+
+    if "event_id" in item:
+        kind = item.get("kind")
+        if kind == "handoff":
+            phase = _mapping(_payload(item).get("state")).get("phase")
+            return phase if phase in HANDOFF_PHASES else None
+        if kind == "review":
+            handoff = _event_map(trace).get(_payload(item).get("handoff_ref"), {})
+            phase = _mapping(_payload(handoff).get("state")).get("phase")
+            if phase in {"review", "final_review"}:
+                return phase
+            number = review_number.setdefault("event", 0)
+            review_number["event"] = number + 1
+            return "review" if number == 0 else "final_review"
+        return {
+            "context_frozen": "freeze",
+            "inspection": "inspect",
+            "implementation": "implement",
+            "repair": "repair",
+            "verify": "verify",
+            "promotion": "promote",
+            "completion_gate": "completion_gate",
+        }.get(kind)
+    phase = item.get("phase")
+    if phase == "freeze_context":
+        return "freeze"
+    if phase == "review":
+        event = _event_map(trace).get(item.get("event_ref"), {})
+        handoff = _event_map(trace).get(_payload(event).get("handoff_ref"), {})
+        handoff_phase = _mapping(_payload(handoff).get("state")).get("phase")
+        if handoff_phase in {"review", "final_review"}:
+            return handoff_phase
+        number = review_number.setdefault("call", 0)
+        review_number["call"] = number + 1
+        return "review" if number == 0 else "final_review"
+    return phase if phase in {
+        "inspect", "implement", "repair", "verify", "promote", "completion_gate"
+    } else None
+
+
+def _sequence_is_causal(trace: Dict[str, Any]) -> bool:
+    """Validate one unique, phase-causal timeline shared by all trace items."""
+
+    events = [item for item in _list(trace.get("events")) if isinstance(item, dict)]
+    calls = [item for item in _list(trace.get("tool_calls")) if isinstance(item, dict)]
+    values = [item.get("sequence") for item in events + calls]
+    if (
+        not values
+        or any(not isinstance(value, int) or isinstance(value, bool) for value in values)
+        or len(values) != len(set(values))
+    ):
+        return False
+    if any(
+        left.get("sequence") >= right.get("sequence")
+        for items in (events, calls)
+        for left, right in zip(items, items[1:])
+    ):
+        return False
+    merged = sorted(events + calls, key=lambda item: item["sequence"])
+    ranks = {
+        "freeze": 0,
+        "inspect": 1,
+        "implement": 2,
+        "review": 3,
+        "repair": 4,
+        "verify": 5,
+        "final_review": 6,
+        "promote": 7,
+        "completion_gate": 8,
+    }
+    review_number: Dict[str, int] = {}
+    phases = [_lifecycle_phase(trace, item, review_number) for item in merged]
+    if any(phase not in ranks for phase in phases):
+        return False
+    if any(ranks[left] > ranks[right] for left, right in zip(phases, phases[1:])):
+        return False
+    for event in events:
+        call = _linked_call(trace, event)
+        if call is not None and call.get("sequence") >= event.get("sequence"):
+            return False
+    for index, handoff in _events(trace, "handoff"):
+        target = _next_handoff_target(trace, index, handoff)
+        if target is None or handoff.get("sequence") >= target[1].get("sequence"):
+            return False
+    return True
 
 
 def _grade_context(trace: Dict[str, Any]) -> Dict[str, Any]:
@@ -364,6 +917,7 @@ def _grade_order(trace: Dict[str, Any]) -> Dict[str, Any]:
     first = lambda values: values[0] if values else 10**9
     last = lambda values: values[-1] if values else -1
     checks = [
+        ("unified_sequence", _sequence_is_causal(trace), "event and tool sequences must be unique and strictly causal"),
         ("starts_freeze", bool(freeze) and freeze[0] == 0, "tool calls must start with freeze_context"),
         ("inspect_after_freeze", bool(inspect) and first(inspect) > first(freeze), "inspect must follow freeze_context"),
         ("implement_after_inspect", bool(implement) and first(implement) > first(inspect), "implement must follow inspect"),
@@ -372,7 +926,7 @@ def _grade_order(trace: Dict[str, Any]) -> Dict[str, Any]:
         ("verify_after_repair", bool(verify) and first(verify) > first(repair), "verify must follow repair"),
         ("final_review_after_verify", len(reviews) >= 2 and last(reviews) > first(verify), "final review must follow verify"),
         ("promote_after_final_review", bool(promote) and first(promote) > last(reviews), "promotion must follow final review"),
-        ("promotion_last", bool(promote) and promote[-1] == len(calls) - 1, "promotion must be the final tool call"),
+        ("promotion_last", bool(promote) and (promote[-1] == len(calls) - 1 or (promote[-1] == len(calls) - 2 and calls[-1].get("phase") == "completion_gate")), "promotion must immediately precede the completion gate"),
     ]
     return _result(CRITERIA[1][0], CRITERIA[1][1], checks)
 
@@ -396,6 +950,7 @@ def _grade_sessions(trace: Dict[str, Any]) -> Dict[str, Any]:
     verify_session = _session(trace, verify[0][1].get("actor_id")) if verify else ""
     expected_roles = {
         "context_frozen": "orchestrator",
+        "inspection": "orchestrator",
         "implementation": "implementer",
         "review": "reviewer",
         "repair": "repairer",
@@ -438,6 +993,12 @@ def _grade_scope(trace: Dict[str, Any]) -> Dict[str, Any]:
         isinstance(item, dict) and _check_scope(item.get("write_scope"))
         for item in _list(trace.get("assignments"))
     )
+    assignment_read_scopes_ok = all(
+        isinstance(item, dict) and _check_read_scope(item.get("read_scope"))
+        for item in _list(trace.get("assignments"))
+    )
+    event_reads = [path for item in event_items if isinstance(item, dict) for path in _list(item.get("reads"))]
+    call_reads = [path for item in call_items if isinstance(item, dict) for path in _list(item.get("reads"))]
     event_paths = [path for item in event_items if isinstance(item, dict) for path in _list(item.get("writes"))]
     call_paths = [path for item in call_items if isinstance(item, dict) for path in _list(item.get("writes"))]
     event_assignment_ok = True
@@ -452,29 +1013,61 @@ def _grade_scope(trace: Dict[str, Any]) -> Dict[str, Any]:
         )
         owner_ok = owner_ok and assignment.get("owner_actor_id") == item.get("actor_id")
     call_assignment_ok = True
+    call_owner_ok = True
     for item in call_items:
         if not isinstance(item, dict) or not item.get("writes"):
             continue
         assignment = assignments.get(item.get("assignment_id"), {})
+        call_owner_ok = call_owner_ok and assignment.get("owner_actor_id") == item.get("actor_id")
         call_assignment_ok = call_assignment_ok and bool(assignment) and all(
             any(_inside(path, scope) for scope in _list(assignment.get("write_scope")))
             for path in item.get("writes", [])
         )
+    event_read_assignment_ok = True
+    event_read_owner_ok = True
+    for item in event_items:
+        if not isinstance(item, dict) or not item.get("reads"):
+            continue
+        assignment = assignments.get(item.get("assignment_id"), {})
+        event_read_assignment_ok = event_read_assignment_ok and bool(assignment) and all(
+            any(_inside(path, scope) for scope in _list(assignment.get("read_scope")))
+            for path in item.get("reads", [])
+        )
+        event_read_owner_ok = event_read_owner_ok and assignment.get("owner_actor_id") == item.get("actor_id")
+    call_read_assignment_ok = True
+    call_read_owner_ok = True
+    for item in call_items:
+        if not isinstance(item, dict) or not item.get("reads"):
+            continue
+        assignment = assignments.get(item.get("assignment_id"), {})
+        call_read_assignment_ok = call_read_assignment_ok and bool(assignment) and all(
+            any(_inside(path, scope) for scope in _list(assignment.get("read_scope")))
+            for path in item.get("reads", [])
+        )
+        call_read_owner_ok = call_read_owner_ok and assignment.get("owner_actor_id") == item.get("actor_id")
     read_only_ok = all(
         not item.get("writes")
         for item in event_items + call_items
         if isinstance(item, dict) and (
-            item.get("kind") in {"context_frozen", "review", "verify"}
+            item.get("kind") in {"context_frozen", "inspection", "review", "verify"}
             or item.get("phase") in {"freeze_context", "review", "verify", "inspect"}
         )
     )
     checks = [
         ("declared_root", roots == [EXPECTED_WRITE_ROOT], "allowed_write_roots must be exactly the evals directory"),
         ("assignment_scopes", assignment_scopes_ok, "assignment scopes must remain inside the evals directory"),
+        ("assignment_read_scopes", assignment_read_scopes_ok, "assignment read scopes must be normalized and remain inside context or evals roots"),
+        ("event_read_paths", all(any(_inside(path, root) for root in EXPECTED_READ_ROOTS) for path in event_reads), "event reads must stay inside context or evals roots"),
+        ("call_read_paths", all(any(_inside(path, root) for root in EXPECTED_READ_ROOTS) for path in call_reads), "tool-call reads must stay inside context or evals roots"),
+        ("event_read_assignment", event_read_assignment_ok, "event reads must stay inside their declared assignment read scope"),
+        ("call_read_assignment", call_read_assignment_ok, "tool-call reads must stay inside their declared assignment read scope"),
+        ("event_read_owner", event_read_owner_ok, "event readers must own their declared assignment"),
+        ("call_read_owner", call_read_owner_ok, "tool-call readers must own their declared assignment"),
         ("event_paths", all(_inside(path) for path in event_paths), "event writes must stay inside the evals directory"),
         ("call_paths", all(_inside(path) for path in call_paths), "tool-call writes must stay inside the evals directory"),
         ("event_assignment", event_assignment_ok, "event writes must stay inside their assignment scope"),
         ("call_assignment", call_assignment_ok, "tool-call writes must stay inside their assignment scope"),
+        ("call_owner", call_owner_ok, "tool-call actors must own their declared assignment"),
         ("writer_owner", owner_ok, "writers may only write under their assigned scope"),
         ("read_only", read_only_ok, "context, review, verify, and inspect actions cannot write"),
         ("context_scope", all(path != CONTEXT_PATH for path in event_paths + call_paths), "frozen context cannot be written"),
@@ -485,18 +1078,135 @@ def _grade_scope(trace: Dict[str, Any]) -> Dict[str, Any]:
 def _grade_handoff(trace: Dict[str, Any]) -> Dict[str, Any]:
     handoffs = _events(trace, "handoff")
     assignments = _id_map(_list(trace.get("assignments")), "assignment_id")
-    evidence_ids = {item.get("evidence_id") for item in _list(trace.get("evidence")) if isinstance(item, dict)}
+    evidence_ids = {
+        item.get("evidence_id")
+        for item in _list(trace.get("evidence"))
+        if isinstance(item, dict) and isinstance(item.get("evidence_id"), str)
+    }
     target_roles = [_role(trace, event.get("to_actor_id")) for _, event in handoffs]
+    contract_values = [
+        (index, event, *_handoff_contract_values(trace, index, event))
+        for index, event in handoffs
+    ]
+    inputs = [item[2] for item in contract_values]
+    outputs = [item[3] for item in contract_values]
+    errors = [item[4] for item in contract_values]
+    targets = [item[5] for item in contract_values]
+    explicit = [item[6] for item in contract_values]
+    input_schema_ok = all(
+        _valid_handoff_input(trace, event, input_payload, evidence_ids)
+        for (_, event, input_payload, _, _, _, _) in contract_values
+    )
+    output_schema_ok = all(
+        _valid_handoff_output(
+            trace,
+            event,
+            output,
+            error,
+            target,
+            evidence_ids,
+            is_explicit,
+        )
+        for (_, event, _, output, error, target, is_explicit) in contract_values
+    )
+    error_schema_ok = all(_valid_handoff_error(error, evidence_ids) for error in errors)
+    stop_schema_ok = all(
+        _valid_handoff_stop(input_payload.get("stop"), evidence_ids)
+        for input_payload in inputs
+    )
+    outcome_coherence_ok = all(
+        (
+            _mapping(output).get("status") == "complete"
+            and error is None
+            and input_payload.get("stop") is None
+            and not _list(_mapping(output).get("unresolved_risks"))
+        )
+        or (
+            _mapping(output).get("status") == "needs_repair"
+            and error is None
+            and input_payload.get("stop") is None
+            and bool(_list(_mapping(output).get("unresolved_risks")))
+        )
+        or (
+            _mapping(output).get("status") == "blocked"
+            and isinstance(error, dict)
+            and _mapping(input_payload.get("stop")).get("required") is True
+            and bool(_list(_mapping(output).get("unresolved_risks")))
+        )
+        for (_, _, input_payload, output, error, _, _) in contract_values
+    )
+    local_output_evidence_ok = all(
+        all(
+            next(
+                (
+                    record.get("source_id") == event.get("event_id")
+                    and record.get("kind") == "handoff"
+                    for record in _list(trace.get("evidence"))
+                    if isinstance(record, dict)
+                    and record.get("evidence_id") == evidence_id
+                ),
+                False,
+            )
+            for evidence_id in _string_ids(_mapping(output).get("evidence"), nonempty=True)
+        )
+        for (_, event, _, output, _, _, _) in contract_values
+    )
+    assignment_owner_ok = all(
+        assignments.get(_mapping(input_payload.get("assignment")).get("id"), {}).get("owner_actor_id")
+        == event.get("to_actor_id")
+        for (_, event, input_payload, _, _, _, _) in contract_values
+    )
+    after_handoff_ok = all(
+        target is not None and target[0] > index
+        for (index, _, _, _, _, target, _) in contract_values
+    )
+    strict_backrefs_ok = all(
+        not _strict_contract(trace)
+        or (
+            target is not None
+            and _payload(target[1]).get("handoff_ref") == event.get("event_id")
+            and sum(
+                _payload(candidate).get("handoff_ref") == event.get("event_id")
+                for _, candidate in _events(trace)
+            ) == 1
+        )
+        for (_, event, _, _, _, target, _) in contract_values
+    )
+    input_evidence_order_ok = all(
+        all(
+            (position := _evidence_position(trace, evidence_id)) is not None
+            and position < index
+            for evidence_id in _string_ids(input_payload.get("evidence"), nonempty=True)
+        )
+        for index, _, input_payload, _, _, _, _ in contract_values
+    )
     checks = [
         ("count", len(handoffs) >= 5, "the run needs handoffs for implementation, review, repair, verify, and final review"),
         ("orchestrator", all(_role(trace, event.get("actor_id")) == "orchestrator" for _, event in handoffs), "handoffs must be emitted by the orchestrator"),
         ("target_roles", target_roles[:5] == ["implementer", "reviewer", "repairer", "verifier", "reviewer"], "handoff targets must follow the workflow"),
-        ("required_fields", all(set(("context", "assignment", "state", "evidence", "fresh_session")) <= set(_payload(event)) for _, event in handoffs), "every handoff needs context, assignment, state, evidence, and freshness"),
-        ("context", all((_payload(event).get("context", {}) or {}).get("path") == CONTEXT_PATH and (_payload(event).get("context", {}) or {}).get("frozen") is True for _, event in handoffs), "handoffs must carry the frozen context"),
-        ("assignment", all(((_payload(event).get("assignment", {}) or {}).get("id") in assignments) for _, event in handoffs), "handoffs must name a declared assignment"),
-        ("state", all(isinstance(_payload(event).get("state"), dict) and _nonempty_string(_payload(event).get("state", {}).get("phase")) for _, event in handoffs), "handoffs must carry current state"),
-        ("evidence", all(set(_list(_payload(event).get("evidence"))) <= evidence_ids and _list(_payload(event).get("evidence")) for _, event in handoffs), "handoffs must carry linked evidence"),
-        ("fresh", all(_payload(event).get("fresh_session") is True for _, event in handoffs), "delegated sessions must be marked fresh"),
+        ("required_fields", all(
+            (set(("context", "assignment", "state", "input", "output", "error", "stop", "evidence", "fresh_session")) <= set(_payload(event))
+             and set(HANDOFF_OUTPUT_FIELDS) <= set(_mapping(_payload(event).get("output")))
+             and "error" in _payload(event))
+            if _strict_contract(trace)
+            else set(HANDOFF_INPUT_FIELDS) <= set(_payload(event))
+            for _, event in handoffs
+        ), "every handoff needs the fixed input, output, and error contract"),
+        ("input_schema", input_schema_ok, "handoff input must carry typed context, assignment, state, evidence, and freshness"),
+        ("output_schema", output_schema_ok, "handoff output must be a typed delivery linked to its target event"),
+        ("error_schema", error_schema_ok, "handoff errors must use code, message, and recoverable fields"),
+        ("stop_schema", stop_schema_ok, "handoff stops must carry a typed required reason and registered evidence"),
+        ("outcome_coherence", outcome_coherence_ok, "handoff output, error, and stop states must agree"),
+        ("output_evidence", local_output_evidence_ok, "handoff output evidence must be sourced from that handoff"),
+        ("context", all(_mapping(input_payload.get("context")).get("path") == CONTEXT_PATH and _mapping(input_payload.get("context")).get("frozen") is True for input_payload in inputs), "handoffs must carry the frozen context"),
+        ("assignment", all(_mapping(input_payload.get("assignment")).get("id") in assignments for input_payload in inputs), "handoffs must name a declared assignment"),
+        ("assignment_owner", assignment_owner_ok, "handoff assignment owner must equal its target actor"),
+        ("state", all(isinstance(_mapping(input_payload.get("state")), dict) and _nonempty_string(_mapping(input_payload.get("state")).get("phase")) for input_payload in inputs), "handoffs must carry current state"),
+        ("evidence", all(set(_string_ids(input_payload.get("evidence"), nonempty=True)) <= evidence_ids and _string_ids(input_payload.get("evidence"), nonempty=True) for input_payload in inputs), "handoffs must carry linked evidence"),
+        ("evidence_order", input_evidence_order_ok, "handoff input evidence must come from an earlier observable action"),
+        ("fresh", all(input_payload.get("fresh_session") is True for input_payload in inputs), "delegated sessions must be marked fresh"),
+        ("target_event", after_handoff_ok, "handoff output must point to the next target action"),
+        ("target_backref", strict_backrefs_ok, "target action must point back to the handoff that caused it"),
         ("after_freeze", bool(handoffs) and handoffs[0][0] > (_events(trace, "context_frozen")[0][0] if _events(trace, "context_frozen") else 10**9), "handoffs must follow context freeze"),
     ]
     return _result(CRITERIA[4][0], CRITERIA[4][1], checks)
@@ -533,6 +1243,175 @@ def _grade_review(trace: Dict[str, Any]) -> Dict[str, Any]:
     return _result(CRITERIA[5][0], CRITERIA[5][1], checks)
 
 
+def _source_kind_matches(record: Dict[str, Any], source: Dict[str, Any]) -> bool:
+    source_kind = source.get("kind")
+    if source_kind is None:
+        source_kind = source.get("phase")
+    return source_kind in EVIDENCE_SOURCE_KINDS.get(record.get("kind"), set())
+
+
+def _source_is_causal(trace: Dict[str, Any], source_id: Any) -> bool:
+    events = _event_map(trace)
+    calls = _call_map(trace)
+    if source_id in calls:
+        return _linked_call_event(trace, calls[source_id]) is not None
+    source = events.get(source_id)
+    if source is None:
+        return False
+    if source.get("kind") in EVENT_TOOL_PHASES:
+        linked = _linked_call(trace, source)
+        return linked is not None and _linked_call_event(trace, linked) is not None
+    return source.get("kind") in {"handoff", "completion_gate"}
+
+
+def _verifier_evidence_status(
+    trace: Dict[str, Any]
+) -> Tuple[bool, bool, bool]:
+    """Return (observable, multidimensional, per_criterion) verifier status."""
+
+    records = {
+        item.get("evidence_id"): item
+        for item in _list(trace.get("evidence"))
+        if isinstance(item, dict) and isinstance(item.get("evidence_id"), str)
+    }
+    verifications = _events(trace, "verify")
+    if not verifications:
+        return False, False, False
+
+    verify_ids = {event.get("event_id") for _, event in verifications}
+    observable_records = [
+        item
+        for item in records.values()
+        if item.get("kind") == "verification"
+        and item.get("source_id") in verify_ids
+        and _source_is_causal(trace, item.get("source_id"))
+    ]
+    observable = bool(observable_records) and any(
+        record.get("evidence_id") in _id_set(event.get("evidence"))
+        for record in observable_records
+        for _, event in verifications
+        if record.get("source_id") == event.get("event_id")
+    )
+    if not _strict_contract(trace):
+        # The v1 fixture has one typed verification record and gap coverage;
+        # that is the compatibility projection of the stronger v2 contract.
+        return observable, observable, observable
+
+    verify = verifications[-1][1]
+    verifier = _mapping(_payload(verify).get("verifier"))
+    dimensions = verifier.get("dimensions")
+    criteria = verifier.get("criteria")
+    if not isinstance(dimensions, dict) or not isinstance(criteria, dict):
+        return observable, False, False
+
+    dimension_record_ids: List[str] = []
+    dimensions_ok = True
+    declared_dimensions = _declared_verifier_dimensions(trace)
+    for dimension in declared_dimensions:
+        entry = _mapping(dimensions.get(dimension))
+        refs = _string_ids(entry.get("evidence"), nonempty=True)
+        applicable = entry.get("applicable")
+        expected_result = "pass" if applicable is True else "not_applicable"
+        dimensions_ok = dimensions_ok and (
+            set(entry) == {"id", "applicable", "result", "claim", "evidence"}
+            and entry.get("id") == dimension
+            and isinstance(applicable, bool)
+            and (dimension not in BASE_VERIFIER_DIMENSIONS or applicable is True)
+            and entry.get("result") == expected_result
+            and _nonempty_string(entry.get("claim"))
+            and bool(refs)
+        )
+        for evidence_id in refs:
+            record = records.get(evidence_id, {})
+            dimensions_ok = dimensions_ok and (
+                record.get("kind") == "verification"
+                and record.get("source_id") == verify.get("event_id")
+                and record.get("dimension") == dimension
+                and record.get("applicable") is applicable
+                and record.get("result") == expected_result
+            )
+        dimension_record_ids.extend(refs)
+    dimensions_ok = dimensions_ok and len(dimension_record_ids) == len(set(dimension_record_ids))
+
+    criterion_record_ids: List[str] = []
+    criteria_ok = True
+    for criterion_id, _ in CRITERIA:
+        entry = _mapping(criteria.get(criterion_id))
+        refs = _string_ids(entry.get("evidence"), nonempty=True)
+        criteria_ok = criteria_ok and (
+            set(entry) == {"result", "claim", "evidence"}
+            and entry.get("result") == "pass"
+            and _nonempty_string(entry.get("claim"))
+            and bool(refs)
+        )
+        for evidence_id in refs:
+            record = records.get(evidence_id, {})
+            criteria_ok = criteria_ok and (
+                record.get("kind") == "verification"
+                and record.get("source_id") == verify.get("event_id")
+                and record.get("criterion_id") == criterion_id
+                and record.get("result") == "pass"
+            )
+        criterion_record_ids.extend(refs)
+    criteria_ok = criteria_ok and len(criterion_record_ids) == len(set(criterion_record_ids))
+    # Keep the v2 gate explicit and deterministic: every declared item must
+    # have a unique, verifier-sourced pass record with its matching label.
+    dimension_refs = [ref for name in declared_dimensions for ref in _string_ids(_mapping(dimensions.get(name)).get("evidence"), nonempty=True)]
+    criterion_refs = [ref for name, _ in CRITERIA for ref in _string_ids(_mapping(criteria.get(name)).get("evidence"), nonempty=True)]
+    all_refs = dimension_refs + criterion_refs
+    distinct_refs = len(all_refs) == len(set(all_refs))
+    return (
+        observable,
+        dimensions_ok
+        and set(dimensions) == set(declared_dimensions)
+        and len(dimension_refs) == len(declared_dimensions)
+        and distinct_refs,
+        criteria_ok
+        and set(criteria) == {name for name, _ in CRITERIA}
+        and len(criterion_refs) == len(CRITERIA)
+        and distinct_refs,
+    )
+
+
+def _event_evidence_links(trace: Dict[str, Any]) -> bool:
+    """Ensure each observable event has local evidence and valid references."""
+
+    records = {
+        item.get("evidence_id"): item
+        for item in _list(trace.get("evidence"))
+        if isinstance(item, dict) and isinstance(item.get("evidence_id"), str)
+    }
+    ok = True
+    for _, event in _events(trace):
+        refs = _string_ids(event.get("evidence"), nonempty=True)
+        if not refs or not set(refs) <= set(records):
+            ok = False
+            continue
+        source_ids = {event.get("event_id")}
+        linked = _linked_call(trace, event)
+        if linked is not None:
+            source_ids.add(linked.get("call_id"))
+        if event.get("kind") == "completion_gate":
+            reviews = _events(trace, "review")
+            verifications = _events(trace, "verify")
+            promotions = _events(trace, "promotion")
+            terminal_sources = [
+                reviews[-1][1] if reviews else {},
+                verifications[-1][1] if verifications else {},
+                promotions[-1][1] if promotions else {},
+                event,
+            ]
+            source_ids = set()
+            for source in terminal_sources:
+                source_ids.add(source.get("event_id"))
+                source_call = _linked_call(trace, source)
+                if source_call is not None:
+                    source_ids.add(source_call.get("call_id"))
+        if any(records[ref].get("source_id") not in source_ids for ref in refs):
+            ok = False
+    return ok
+
+
 def _grade_evidence(trace: Dict[str, Any]) -> Dict[str, Any]:
     records = [item for item in _list(trace.get("evidence")) if isinstance(item, dict)]
     record_map = {item.get("evidence_id"): item for item in records}
@@ -544,10 +1423,43 @@ def _grade_evidence(trace: Dict[str, Any]) -> Dict[str, Any]:
         if "evidence" in event
     )
     paths_ok = True
+    source_kinds_ok = True
+    causal_sources_ok = True
     for record in records:
         source = sources.get(record.get("source_id"), {})
         available = set(_list(source.get("reads")) + _list(source.get("writes")))
         paths_ok = paths_ok and all(path in available for path in _list(record.get("paths")))
+        source_kinds_ok = source_kinds_ok and _source_kind_matches(record, source)
+        causal_sources_ok = causal_sources_ok and _source_is_causal(trace, record.get("source_id"))
+    causal_links_ok, _ = _event_tool_links(trace)
+    verifier_observable, verifier_dimensions, verifier_criteria = _verifier_evidence_status(trace)
+    used_evidence = set()
+    for event_index, event in lifecycle:
+        used_evidence.update(_id_set(event.get("evidence")))
+        if event.get("kind") == "handoff":
+            input_payload, output, _, _, _ = _handoff_contract_values(trace, event_index, event)
+            used_evidence.update(_id_set(input_payload.get("evidence")))
+            used_evidence.update(_id_set(_mapping(output).get("evidence")))
+        if event.get("kind") == "verify":
+            verifier = _mapping(_payload(event).get("verifier"))
+            for group in (verifier.get("dimensions"), verifier.get("criteria")):
+                if isinstance(group, dict):
+                    for entry in group.values():
+                        used_evidence.update(_id_set(_mapping(entry).get("evidence")))
+        if event.get("kind") == "completion_gate":
+            # v1 gates already have a terminal evidence record whose source is
+            # the gate itself, even though the gate payload links its three
+            # decision inputs.  Preserve that representation while still
+            # requiring every other registry entry to be referenced.
+            used_evidence.update(
+                record_id
+                for record_id, record in record_map.items()
+                if record.get("source_id") == event.get("event_id")
+            )
+    for escalation in _list(trace.get("escalations")):
+        if isinstance(escalation, dict):
+            used_evidence.update(_id_set(escalation.get("evidence")))
+    all_records_used = set(record_map) <= used_evidence
     required = {
         "read": any(item.get("kind") == "read" for item in records),
         "handoff": any(item.get("kind") == "handoff" for item in records),
@@ -558,7 +1470,7 @@ def _grade_evidence(trace: Dict[str, Any]) -> Dict[str, Any]:
         "gate": any(item.get("kind") == "gate" for item in records),
     }
     gate = _events(trace, "completion_gate")
-    gate_refs = set(_list(gate[-1][1].get("evidence"))) if gate else set()
+    gate_refs = _id_set(gate[-1][1].get("evidence")) if gate else set()
     gate_kinds = {record_map[ref].get("kind") for ref in gate_refs if ref in record_map}
     checks = [
         ("registry", bool(records) and len(record_map) == len(records), "evidence registry must be non-empty and unique"),
@@ -566,8 +1478,16 @@ def _grade_evidence(trace: Dict[str, Any]) -> Dict[str, Any]:
         ("claims", all(_nonempty_string(item.get("claim")) and item.get("kind") in EVIDENCE_KINDS for item in records), "evidence needs a typed claim"),
         ("event_refs", refs_ok, "actions must reference registered evidence"),
         ("paths", paths_ok, "evidence paths must be observable in the source action"),
+        ("source_kinds", source_kinds_ok, "evidence kind must match the observable source action"),
+        ("causal_sources", causal_sources_ok, "evidence sources must belong to the causal event/tool sequence"),
+        ("causal_links", causal_links_ok, "operational events and tool calls need exact causal links"),
+        ("event_observability", _event_evidence_links(trace), "every observable event needs local linked evidence"),
+        ("registry_usage", all_records_used, "registered evidence cannot be orphaned"),
         ("required_kinds", all(required.values()), "read, handoff, diff, review, verification, promotion, and gate evidence are required"),
         ("gate_links", {"review", "verification", "promotion"} <= gate_kinds, "completion gate must link final review, verification, and promotion"),
+        ("verifier_observable", verifier_observable, "verification must be backed by evidence sourced from the verifier event"),
+        ("verifier_dimensions", verifier_dimensions, "verifier evidence must exactly cover every declared quality dimension"),
+        ("verifier_criteria", verifier_criteria, "verifier evidence must cover every rubric criterion"),
     ]
     return _result(CRITERIA[6][0], CRITERIA[6][1], checks)
 
@@ -584,17 +1504,21 @@ def _grade_repair(trace: Dict[str, Any]) -> Dict[str, Any]:
     gaps = set(_gaps(initial))
     repair_payload = _payload(repair) if repair else {}
     verify_payload = _payload(verify) if verify else {}
+    verifier_observable, verifier_dimensions, verifier_criteria = _verifier_evidence_status(trace)
     order_ok = bool(implementations and reviews and repairs and verifications and reviews[-1][0] > verifications[0][0])
     checks = [
         ("implementation", bool(implementations), "implementation is required"),
         ("initial_review", bool(reviews) and bool(gaps), "initial review must expose material gaps"),
         ("repair_order", bool(repairs and reviews and repairs[0][0] > reviews[0][0]), "repair must follow the initial review"),
-        ("resolves", bool(gaps) and gaps <= set(_list(repair_payload.get("resolves"))), "repair must name every reviewed gap"),
+        ("resolves", bool(gaps) and gaps <= _id_set(repair_payload.get("resolves")), "repair must name every reviewed gap"),
         ("repair_write", bool(repair and _list(repair.get("writes"))), "repair must produce a scoped write"),
         ("verify_order", bool(verifications and repairs and verifications[0][0] > repairs[0][0]), "verification must follow repair"),
-        ("rechecks", bool(gaps) and gaps <= set(_list(verify_payload.get("rechecks"))), "verification must recheck every repaired gap"),
+        ("rechecks", bool(gaps) and gaps <= _id_set(verify_payload.get("rechecks")), "verification must recheck every repaired gap"),
         ("verify_pass", bool(verify) and verify_payload.get("result") == "pass" and verify_payload.get("independent") is True, "verification must independently pass"),
         ("verify_readonly", bool(verify) and not _list(verify.get("writes")) and _linked_call(trace, verify) is not None, "verification must be read-only and linked to its call"),
+        ("verifier_evidence", verifier_observable, "verification flags must be backed by observable verifier evidence"),
+        ("verifier_dimensions", verifier_dimensions, "verification must provide evidence for every quality dimension"),
+        ("verifier_criteria", verifier_criteria, "verification must provide evidence for every rubric criterion"),
         ("final_review", order_ok and not _gaps(final) and _payload(final).get("resolved") is True if final else False, "latest review must have no material gaps"),
     ]
     return _result(CRITERIA[7][0], CRITERIA[7][1], checks)
@@ -611,16 +1535,30 @@ def _grade_completion(trace: Dict[str, Any]) -> Dict[str, Any]:
     final_review_ok = bool(reviews) and not _gaps(reviews[-1][1]) and _payload(reviews[-1][1]).get("resolved") is True
     verify_ok = bool(verifications) and _payload(verifications[-1][1]).get("result") == "pass"
     promotion_ok = bool(promotions) and _payload(promotions[-1][1]).get("approved") is True and promotions[-1][0] > (reviews[-1][0] if reviews else 10**9)
+    linked_call = _linked_call(trace, gate) if gate else None
+    evidence_records = {
+        item.get("evidence_id"): item
+        for item in _list(trace.get("evidence"))
+        if isinstance(item, dict)
+    }
+    decision_evidence = _id_set(payload.get("evidence"))
+    decision_kinds = {
+        evidence_records[reference].get("kind")
+        for reference in decision_evidence
+        if reference in evidence_records
+    }
     checks = [
         ("one_gate", len(gates) == 1, "exactly one terminal completion gate is required"),
         ("terminal_event", bool(gates) and gates[-1][0] == len(_list(trace.get("events"))) - 1, "completion gate must be terminal"),
         ("orchestrator_readonly", bool(gate) and _role(trace, gate.get("actor_id")) == "orchestrator" and not _list(gate.get("writes")), "gate must be an orchestrator read-only decision"),
+        ("tool_link", bool(linked_call) and linked_call.get("phase") == "completion_gate" and linked_call.get("mode") == "read_only", "gate must link its completion tool call"),
         ("decision", payload.get("decision") == "complete", "gate decision must be complete"),
         ("flags", all(payload.get(flag) is True for flag in required_flags), "all completion gate flags must be true"),
         ("review_clear", final_review_ok, "latest review must be clear"),
         ("verification", verify_ok, "verification must pass"),
         ("promotion", promotion_ok, "scoped promotion must follow final review"),
         ("gate_evidence", bool(gate) and bool(_list(gate.get("evidence"))), "gate must carry evidence"),
+        ("decision_evidence", decision_evidence == _id_set(gate.get("evidence")) and {"review", "verification", "promotion", "gate"} <= decision_kinds, "gate payload must link final review, verification, promotion, and its gate record"),
         ("no_blocker", payload.get("no_unresolved_blocker") is True, "unresolved blockers cannot be completed"),
     ]
     return _result(CRITERIA[8][0], CRITERIA[8][1], checks)

@@ -1,31 +1,84 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
+  "trace_schema_version": 2,
   "score_max": 100,
   "acceptance": {
     "decision": "ACCEPT",
     "score": 100,
     "grade": "A"
   },
+  "contracts": {
+    "sequence": "Every event and tool call has a unique integer sequence in one merged lifecycle; array order, phase order, call-before-event links, and handoff-before-target links are strictly causal.",
+    "causal_links": "Operational event and tool links are bidirectional and exactly match phase, actor, assignment, reads, and writes.",
+    "handoff": "Every handoff has exact typed context, assignment (including normalized read_scope and write_scope), state, input, output, error, stop, evidence, and fresh_session fields; output status is complete, needs_repair, or blocked, and output targets, changed paths, outcome state, and unique target backrefs agree.",
+    "verifier": "The verifier has the four base dimensions plus exactly the trace-declared optional dimensions and all ten rubric criteria, each with distinct aligned verifier-sourced evidence."
+  },
   "criteria": [
-    {"id": "context_freeze", "points": 10, "checks": ["exactly_one_context_frozen", "orchestrator_reads_frozen_context_before_handoff", "freeze_payload_is_immutable"]},
-    {"id": "tool_order", "points": 10, "checks": ["freeze_before_inspect_and_implement", "inspect_before_implement", "review_repair_verify_review_promote_order"]},
-    {"id": "session_freshness", "points": 10, "checks": ["role_sessions_are_distinct", "handoffs_mark_fresh_session", "events_use_expected_roles"]},
-    {"id": "write_scope", "points": 10, "checks": ["writes_stay_in_allowed_root", "assignment_scope_is_respected", "reviewer_and_verifier_do_not_write"]},
-    {"id": "handoff_payload", "points": 10, "checks": ["handoff_carries_context", "handoff_carries_assignment_and_state", "handoff_carries_evidence_and_freshness"]},
-    {"id": "readonly_review", "points": 10, "checks": ["review_is_read_only", "review_is_adversarial", "reviewer_is_independent"]},
-    {"id": "evidence", "points": 10, "checks": ["evidence_records_are_valid", "events_link_evidence", "claims_link_to_observable_sources"]},
-    {"id": "repair_reverify", "points": 10, "checks": ["repair_follows_reported_gaps", "verification_rechecks_gaps", "verification_passes_after_repair"]},
-    {"id": "completion_gates", "points": 10, "checks": ["terminal_completion_gate_exists", "gate_requires_review_verification_promotion", "gate_has_no_unresolved_blocker"]},
-    {"id": "escalation", "points": 10, "checks": ["risks_are_declared", "required_risks_are_escalated", "escalations_have_resolution_evidence"]}
+    {
+      "id": "context_freeze",
+      "points": 10,
+      "checks": ["one_freeze", "orchestrator", "frozen_payload", "read_only", "before_delegation", "first_tool", "context_untouched"]
+    },
+    {
+      "id": "tool_order",
+      "points": 10,
+      "checks": ["unified_sequence", "starts_freeze", "inspect_after_freeze", "implement_after_inspect", "review_after_implement", "repair_after_review", "verify_after_repair", "final_review_after_verify", "promote_after_final_review", "promotion_last"]
+    },
+    {
+      "id": "session_freshness",
+      "points": 10,
+      "checks": ["actor_identity", "session_not_shared", "writer_freshness", "review_freshness", "verify_freshness", "role_identity", "handoff_identity"]
+    },
+    {
+      "id": "write_scope",
+      "points": 10,
+      "checks": ["declared_root", "assignment_scopes", "assignment_read_scopes", "event_read_paths", "call_read_paths", "event_read_assignment", "call_read_assignment", "event_read_owner", "call_read_owner", "event_paths", "call_paths", "event_assignment", "call_assignment", "call_owner", "writer_owner", "read_only", "context_scope"]
+    },
+    {
+      "id": "handoff_payload",
+      "points": 10,
+      "checks": ["count", "orchestrator", "target_roles", "required_fields", "input_schema", "output_schema", "error_schema", "stop_schema", "outcome_coherence", "output_evidence", "context", "assignment", "assignment_owner", "state", "evidence", "evidence_order", "fresh", "target_event", "target_backref", "after_freeze"]
+    },
+    {
+      "id": "readonly_review",
+      "points": 10,
+      "checks": ["two_reviews", "reviewer_role", "read_set", "readonly_flag", "adversarial", "tool_link", "review_scope", "initial_gap", "final_clear", "fresh_adversary"]
+    },
+    {
+      "id": "evidence",
+      "points": 10,
+      "checks": ["registry", "sources", "claims", "event_refs", "paths", "source_kinds", "causal_sources", "causal_links", "event_observability", "registry_usage", "required_kinds", "gate_links", "verifier_observable", "verifier_dimensions", "verifier_criteria"]
+    },
+    {
+      "id": "repair_reverify",
+      "points": 10,
+      "checks": ["implementation", "initial_review", "repair_order", "resolves", "repair_write", "verify_order", "rechecks", "verify_pass", "verify_readonly", "verifier_evidence", "verifier_dimensions", "verifier_criteria", "final_review"]
+    },
+    {
+      "id": "completion_gates",
+      "points": 10,
+      "checks": ["one_gate", "terminal_event", "orchestrator_readonly", "tool_link", "decision", "flags", "review_clear", "verification", "promotion", "gate_evidence", "decision_evidence", "no_blocker"]
+    },
+    {
+      "id": "escalation",
+      "points": 10,
+      "checks": ["risk_types", "all_escalated", "decision", "evidence", "no_unresolved"]
+    }
   ],
   "regression_matrix": [
     {"trace": "complete.json", "decision": "ACCEPT", "score": 100, "grade": "A", "failed_criteria": []},
-    {"trace": "incomplete_handoff.json", "decision": "REJECT", "criteria": ["handoff_payload"]},
-    {"trace": "missing_freeze.json", "decision": "REJECT", "criteria": ["context_freeze"]},
-    {"trace": "missing_reverify.json", "decision": "REJECT", "criteria": ["repair_reverify"]},
-    {"trace": "out_of_scope_write.json", "decision": "REJECT", "criteria": ["write_scope"]},
-    {"trace": "premature_completion.json", "decision": "REJECT", "criteria": ["completion_gates"]},
-    {"trace": "reviewer_not_readonly.json", "decision": "REJECT", "criteria": ["write_scope", "readonly_review"]},
-    {"trace": "wrong_tool_order.json", "decision": "REJECT", "criteria": ["tool_order"]}
+    {"trace": "incomplete_handoff.json", "decision": "REJECT", "failed_criteria": ["handoff_payload"]},
+    {"trace": "missing_freeze.json", "decision": "REJECT", "failed_criteria": ["context_freeze"]},
+    {"trace": "missing_handoff_contract.json", "decision": "REJECT", "failed_criteria": ["handoff_payload"]},
+    {"trace": "missing_reverify.json", "decision": "REJECT", "failed_criteria": ["repair_reverify"]},
+    {"trace": "missing_declared_optional_dimension.json", "decision": "REJECT", "failed_criteria": ["evidence", "repair_reverify"]},
+    {"trace": "missing_verifier_dimension_criterion.json", "decision": "REJECT", "failed_criteria": ["evidence", "repair_reverify"]},
+    {"trace": "out_of_read_scope.json", "decision": "REJECT", "failed_criteria": ["write_scope"]},
+    {"trace": "out_of_scope_write.json", "decision": "REJECT", "failed_criteria": ["write_scope"]},
+    {"trace": "premature_completion.json", "decision": "REJECT", "failed_criteria": ["completion_gates"]},
+    {"trace": "reviewer_not_readonly.json", "decision": "REJECT", "failed_criteria": ["write_scope", "readonly_review"]},
+    {"trace": "unrelated_evidence_tool_link.json", "decision": "REJECT", "failed_criteria": ["evidence"]},
+    {"trace": "wrong_tool_order.json", "decision": "REJECT", "failed_criteria": ["tool_order"]}
+    ,{"trace": "missing_tool_event_ref.json", "decision": "REJECT", "failed_criteria": ["evidence"]}
   ]
 }

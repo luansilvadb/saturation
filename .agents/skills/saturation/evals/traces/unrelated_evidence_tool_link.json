@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "trace_id": "trace-premature-completion",
+  "trace_id": "trace-unrelated-evidence-tool-link",
   "objective": "validar ciclo completo de implementação, revisão, reparo, verificação e promoção",
   "allowed_write_roots": [
     ".agents/skills/saturation/evals"
@@ -930,7 +930,7 @@
         "scope_checked": true,
         "independent_review": true,
         "latest_review_clear": true,
-        "verification_passed": false,
+        "verification_passed": true,
         "promotion_reviewed": true,
         "no_unresolved_blocker": true,
         "evidence": [
@@ -1038,7 +1038,7 @@
     },
     {
       "evidence_id": "EV-013",
-      "source_id": "E-013",
+      "source_id": "C-008",
       "kind": "gate",
       "claim": "completion gate terminal confirma conclusão"
     },
@@ -1277,6 +1277,6 @@
     }
   },
   "expected_failed_criteria": [
-    "completion_gates"
+    "evidence"
   ]
 }

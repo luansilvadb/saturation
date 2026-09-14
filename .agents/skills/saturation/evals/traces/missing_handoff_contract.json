@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "trace_id": "trace-premature-completion",
+  "trace_id": "trace-missing-handoff-contract",
   "objective": "validar ciclo completo de implementação, revisão, reparo, verificação e promoção",
   "allowed_write_roots": [
     ".agents/skills/saturation/evals"
@@ -493,28 +493,6 @@
           "EV-inspect"
         ],
         "fresh_session": true,
-        "input": {
-          "objective": "validar ciclo completo de implementação, revisão, reparo, verificação e promoção",
-          "scope": [
-            ".agents/skills/saturation/evals"
-          ],
-          "acceptance": [
-            "context_freeze",
-            "tool_order",
-            "session_freshness",
-            "write_scope",
-            "handoff_payload",
-            "readonly_review",
-            "evidence",
-            "repair_reverify",
-            "completion_gates",
-            "escalation"
-          ],
-          "constraints": [
-            "frozen context",
-            "dependency-free"
-          ]
-        },
         "output": {
           "status": "complete",
           "event_ref": "E-007",
@@ -930,7 +908,7 @@
         "scope_checked": true,
         "independent_review": true,
         "latest_review_clear": true,
-        "verification_passed": false,
+        "verification_passed": true,
         "promotion_reviewed": true,
         "no_unresolved_blocker": true,
         "evidence": [
@@ -1277,6 +1255,6 @@
     }
   },
   "expected_failed_criteria": [
-    "completion_gates"
+    "handoff_payload"
   ]
 }
