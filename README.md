@@ -42,7 +42,7 @@ Scope changes, conflicts, real-world effects, and unresolved blockers must be es
 In a Codex session, invoke the skill with:
 
 ```text
-$saturation
+/saturation
 ```
 
 The skill reads the current session context, freezes it in `.saturation/context.md`, and uses that file as the source of truth for the delegated work.
