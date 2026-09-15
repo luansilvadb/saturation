@@ -4,78 +4,57 @@ Status: FROZEN
 
 ## Objective
 
-Update the saturation prompt/harness evaluation policy so the current
-prompt/harness version does not measure or infer a quality increase or
-decrease. Quality deltas may be measured only by a future, explicitly
-versioned prompt/harness comparison with real outcome data. Preserve the
-current deterministic workflow grade and descriptive token telemetry.
+Keep `/saturation` small and dependable: freeze the user's intent, delegate
+bounded work to clean subagents, apply the relevant code style guides, verify
+the implementation internally, and integrate only the final diff.
 
 ## Scope
+
+- simplify the saturation skill and its internal prompt guidance;
+- keep fresh scoped subagents and useful quality actions;
+- move runtime observation and metrics to `evals`;
+- make delegated writes transactional and temporary;
+- simplify the evaluator and remove prompt/trace protocol baggage;
+- remove generated run artifacts from the repository.
+
+## Non-goals
+
+- removing TDD, review, repair, verification, or coverage as available actions;
+- removing ordinary product tests;
+- exposing internal session details to the user;
+- adding a new persistence layer for orchestration state;
+- changing unrelated skills or user work.
+
+## Acceptance criteria
+
+- `.saturation/context.md` is the only durable harness artifact in the project;
+- no normal `/saturation` run requires or creates prompts, traces, ledgers,
+  evidence files, hashes, or run directories;
+- subagents use fresh sessions, disjoint scopes, relevant style guides, and a
+  temporary workspace;
+- only an approved final diff reaches the primary workspace;
+- `evals` can observe internal events and own its metrics without coupling the
+  runtime to persisted trace schemas;
+- documentation and tests describe the simplified contract consistently.
+
+## Constraints
+
+- keep the evaluator dependency-free and deterministic;
+- preserve unrelated user changes;
+- do not use network access or external effects for validation;
+- do not persist prompt text, session history, or private reasoning;
+- use normal project test locations for tests that intentionally belong to the
+  product.
+
+## Decisions
+
+- orchestration state is ephemeral and a failed run restarts from this context;
+- `evals` observes and measures; `saturation` executes and integrates;
+- historical prompt/trace contracts are not active runtime requirements;
+- the final user-facing result is concise and focused on the delivered code.
+
+## References
 
 - `.agents/skills/saturation/SKILL.md`
 - `.agents/skills/saturation/code_styleguides/prompting.md`
 - `.agents/skills/saturation/evals/README.md`
-- `.agents/skills/saturation/evals/grader.py`
-- `.agents/skills/saturation/evals/token_metrics.py`
-- `.agents/skills/saturation/evals/test_grader.py`
-- `README.md`
-
-Changes must remain limited to policy, documentation, evaluator behavior, and
-focused tests needed to enforce the deferral rule. Do not add provider calls,
-benchmark claims, or external effects. Preserve unrelated user work already
-present in the working tree.
-
-## Quality
-
-- The current schema and workflow acceptance behavior remain deterministic and
-  unchanged for existing fixtures.
-- No current-version report, metric, or test claims that tokens caused a
-  quality improvement or regression.
-- A future comparison is clearly distinguished from a same-version trace and
-  cannot be considered available without explicit version identities and real
-  outcome observations.
-- Documentation and tests state the limitation unambiguously.
-
-## Constraints
-
-- Keep machine-readable contract keys, identifiers, enum values, and paths
-  unchanged unless a versioned contract extension is required.
-- Do not invent benchmark measurements or use token counts as a proxy for
-  quality.
-- Token telemetry remains descriptive and must not affect dispatch or the
-  110-point workflow grade.
-- Keep the evaluator dependency-free and compatible with the existing Python
-  standard-library implementation.
-- Operational prompts, handoffs, reports, and artifacts are written in
-  English; user requirements may be quoted as data.
-- Frozen context is immutable after this point.
-
-## Decisions
-
-- Interpret “next version of the prompt/harness” as an explicit future
-  versioned comparison, not another execution of the current v3 harness.
-- Treat quality increase/decrease as unavailable in the current version unless
-  both a baseline and candidate version plus observed outcome data are part of
-  a future contract.
-- Keep current trace grading focused on observable workflow correctness;
-  forward-looking quality comparison is a separate, non-decisive concern until
-  its contract is versioned.
-
-## Principles
-
-- Measure only what the current contract can identify and observe.
-- Separate descriptive cost/token telemetry from quality claims.
-- Preserve immutable prompt records and avoid retroactive interpretation.
-- Prefer an explicit deferred status over an inferred quality delta.
-
-## Verification Criteria
-
-- Existing complete and regression fixtures retain their expected decisions and
-  scores.
-- Tests cover the absence/deferment of current-version quality comparison and
-  reject or ignore unsupported same-version quality claims according to the
-  chosen contract behavior.
-- Any future-version comparison path is gated by explicit version identities
-  and observed outcomes, if such a path is added.
-- `prompt_contract.py`, `report.py`, and `test_grader.py` complete
-  successfully, with no unresolved risks.

@@ -1,4 +1,4 @@
-"""Portable command-line wrapper for the local saturation trace grader."""
+"""Command-line adapter for evaluator-owned observation snapshots."""
 
 from __future__ import annotations
 

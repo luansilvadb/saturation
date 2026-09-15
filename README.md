@@ -1,173 +1,98 @@
 # Saturation
 
-Saturation is a Codex skill for orchestrating implementation work through fresh, scoped subagents. It turns the current session context into a frozen execution contract and guides the work through implementation, independent review, repair, verification, and promotion.
+Saturation is a Codex skill for implementing work with fresh, scoped
+subagents. It keeps the coordination sophisticated inside the harness while
+keeping the user's repository focused on the actual product code and tests.
 
-## What it provides
+## Core contract
 
-- A repeatable workflow for complex implementation tasks.
-- Explicit scopes, assignments, handoffs, and evidence.
-- Fresh sessions for implementation, review, and verification.
-- Adversarial, read-only review before promotion.
-- A deterministic evaluation suite for catching workflow regressions.
-- A canonical prompt policy with modular composition, PCP complexity budgets,
-  quality gates, and traceable prompt evidence.
-- Enforced test-first execution for testable implementation and repair
-  assignments, with persisted executable test artifacts and red/green gates.
-- Mandatory language-agnostic instrumented line and branch coverage with
-  persisted reports and promotion gates for executable implementations.
+When `/saturation` runs, it:
 
-## Workflow
+1. reads the request and the repository;
+2. creates or refreshes `.saturation/context.md` with the frozen task intent;
+3. derives disjoint assignments in memory;
+4. delegates each assignment to a clean session with the relevant
+   `code_styleguides`;
+5. performs useful quality actions such as tests, TDD, review, repair, and
+   verification internally;
+6. works in a temporary isolated workspace and integrates only the approved
+   final diff;
+7. returns the finished result.
 
-1. Read the modular prompt and code-style guides, then freeze the active
-   context in `.saturation/context.md` before delegation.
-2. Split the work into disjoint assignments with explicit read and write scopes.
-3. Compose, lint, and record each operational prompt before dispatch.
-4. For testable implementation work, create and run the executable test
-   artifact first; require a genuine red result before implementation.
-5. Implement the assignments in fresh sessions and return structured handoffs.
-6. Run instrumented line and branch coverage through the declared language
-   adapter and persist its immutable report.
-7. Review the result and its prompts with a fresh, adversarial, read-only reviewer.
-8. Repair every material gap and verify the repair independently.
-9. Promote the result only after the final review and all completion gates pass.
+The only orchestration artifact kept in the product repository is:
 
-Scope changes, conflicts, real-world effects, and unresolved blockers must be escalated instead of being silently absorbed.
-
-Assignments may read and write explicitly scoped product paths; the synthetic
-trace fixtures use a narrower, self-contained read boundary only for testing.
-
-## At a glance
-
-The frozen context and style guide feed the orchestration rules. Work then moves through fresh implementation, review, repair, verification, and promotion sessions. The evaluation suite grades the observable trace of that workflow.
-
-```mermaid
-flowchart TD
-    C[".saturation/context.md<br/>Frozen run context"] --> S["SKILL.md<br/>Orchestration rules"]
-    G["code_styleguides/prompting.md<br/>general.md<br/>language modules"] --> S
-    M["agents/openai.yaml<br/>Metadata and default prompt"] --> S
-
-    S --> F["Freeze context"]
-    F --> A["Disjoint assignments"]
-    A --> TF["Test-first artifact + red gate"]
-    TF --> I["Fresh implementation sessions"]
-    I --> CV["Instrumented line + branch coverage"]
-    I --> R["Fresh adversarial read-only review"]
-    R --> P{"Material gaps?"}
-    P -- "Yes" --> X["Repair"]
-    X --> V["Fresh independent verification"]
-    P -- "No" --> V
-    V --> Q{"All gates pass?"}
-    Q -- "No" --> X
-    Q -- "Yes" --> PR["Final review"]
-    PR --> PM["Promote"]
-
-    E["evals/report.py"] --> GR["evals/grader.py"]
-    T["evals/test_grader.py"] --> GR
-    TR["evals/traces/*.json"] --> GR
-    TV["evals/traces_v4/*.json"] --> GR
-    RB["evals/rubric.json"] --> GR
+```text
+.saturation/context.md
 ```
+
+Prompts, traces, handoffs, ledgers, hashes, coverage reports, and session
+history are transient. They must not be required for a normal run or written
+under `.saturation/runs/`. Project tests remain ordinary project files.
+
+## Context
+
+`context.md` is a short, human-readable contract containing the objective,
+scope, non-goals, acceptance criteria, constraints, decisions, and relevant
+guide references. It is frozen during a run. It is not a trace, status board,
+prompt catalog, or metrics report.
+
+## Subagent boundaries
+
+Every delegated session receives only the context, repository paths, and style
+rules relevant to its assignment. Write scopes do not overlap. Sessions do not
+share conversational history. Their operational prompts and handoffs remain
+in memory.
+
+The primary workspace is protected from partial writes. A failed or interrupted
+run discards its temporary workspace and starts again from the frozen context.
+
+## Quality and evaluation
+
+TDD, review, repair, independent verification, and coverage are available
+quality actions. They improve confidence but do not create a persistence
+ceremony. Their temporary results can be exposed through an in-memory
+observation hook.
+
+The `evals` package owns metrics and comparisons. It observes saturation runs
+without making the normal runtime write prompts, traces, or reports to the
+product repository. Evaluation fixtures and reports belong to the evaluator,
+not to a product run.
+
+Run the focused evaluator tests with:
+
+```text
+python -B .agents/skills/saturation/evals/test_grader.py
+python -B .agents/skills/saturation/evals/test_quality_comparison.py
+python -B .agents/skills/saturation/evals/test_quality_comparison_edges.py
+python -B .agents/skills/saturation/evals/test_quality_comparison_missing_branches.py
+python -B .agents/skills/saturation/evals/test_quality_comparison_numeric_edges.py
+```
+
+The evaluator also accepts an in-memory observation snapshot through
+`evals/report.py --input <file>`. That file is an evaluator input, not an
+artifact produced by `/saturation`.
 
 ## Repository layout
 
 ```text
 .agents/skills/saturation/
-├── SKILL.md                    # Core skill instructions
-├── agents/openai.yaml          # Display metadata and default prompt
-├── code_styleguides/
-│   ├── README.md               # Module index and selection order
-│   ├── prompting.md            # Prompt construction and prompt trace policy
-│   ├── general.md              # Cross-language structural design
-│   └── <language>.md           # Language-specific guidance
+├── SKILL.md                    # orchestration behavior
+├── agents/openai.yaml          # display metadata and default prompt
+├── code_styleguides/           # reusable implementation rules
 └── evals/
-    ├── prompt_contract.py      # Prompt contract and PCP validator
-    ├── grader.py               # Trace schema and behavioral grader
-    ├── tdd_contract.py         # Schema v4 test-first/red-green contract
-    ├── coverage_contract.py    # Schema v5 line/branch coverage contract
-    ├── token_metrics.py        # Descriptive prompt-input token metrics
-    ├── reasoning_scaffold.py   # Future adaptive scaffold routing policy
-    ├── quality_comparison.py   # Future paired outcome comparison contract
-    ├── report.py               # Portable command-line entry point
-    ├── rubric.json             # Grading criteria and fixture matrix
-    ├── test_grader.py          # Focused unit tests
-    ├── traces/                 # v3 valid and regression trace fixtures
-    └── traces_v4/              # v4 TDD trace fixtures
-.saturation/context.md          # Frozen orchestration context for a run
+    ├── grader.py               # in-memory run evaluator
+    ├── report.py               # evaluator CLI adapter
+    ├── test_grader.py          # evaluator tests
+    ├── reasoning_scaffold.py   # optional internal routing aid
+    └── quality_comparison.py   # optional outcome comparison
+.saturation/context.md          # the only durable harness artifact
 ```
 
-## Use the skill
+## Design principles
 
-In a Codex session, invoke the skill with:
-
-```text
-/saturation
-```
-
-The skill reads the current session context, freezes it in `.saturation/context.md`, and uses that file as the source of truth for the delegated work.
-
-## Run the evaluation suite
-
-The evaluation suite uses only the Python standard library. From the repository root, run:
-
-```text
-python .agents/skills/saturation/evals/prompt_contract.py --trace .agents/skills/saturation/evals/traces/complete.json --root .
-python .agents/skills/saturation/evals/report.py
-python .agents/skills/saturation/evals/test_grader.py
-```
-
-The report grades the checked-in synthetic v3 and v4 traces by default and
-exits successfully only when every declared expectation matches and each
-`ACCEPT` reaches its schema's maximum score (`110/110` for v3, `120/120` for
-v4; schema v5 adds the coverage gate for new traces). Use `--json` for
-machine-readable output or `--traces DIR` to grade
-another directory of direct JSON trace files. Prompt-aware traces include
-rendered prompt evidence, strict module manifests, PCP, and quality gates;
-v4 includes the `tdd-v1` test-first ledger and v5 additionally includes the
-`coverage-v1` instrumented line/branch ledger. The prompt validator can
-independently verify the canonical prompt contract and module hashes; the
-report also emits descriptive PCP, strategy, gate, attempt, repair, TDD, and
-prompt-input token metrics that do not alter acceptance. Fixture token estimates
-use the versioned
-`utf8_bytes_div4_v1` proxy; optional provider observations are recorded under
-`evaluation.token_usage` and are model/tokenizer scoped. The current version
-does not measure quality increases or decreases; that requires a future
-versioned prompt/harness comparison with baseline and candidate outcomes.
-Reports expose this boundary as `metrics.quality_comparison.status=deferred`
-with no quality delta.
-
-The future comparison path is implemented separately in
-`.agents/skills/saturation/evals/quality_comparison.py`. It requires distinct
-baseline and candidate versions, immutable task/oracle versions, controlled
-environment metadata, at least three paired repetitions per task, task-level
-macro aggregation, a pre-registered `0.05` minimum lift, and no critical
-candidate regression. The companion
-`.agents/skills/saturation/evals/reasoning_scaffold.py` activates a concise
-structured scaffold only for evidenced task dependencies or material repairs;
-it never requests hidden chain-of-thought. No current workflow grade changes
-until a future comparison contains real outcome observations.
-
-The checked-in GitHub Actions workflow (`.github/workflows/tests.yml`) runs
-the v3/v4 validators, aggregate report, and focused tests (including the
-in-memory v5 coverage contract) on Ubuntu and Windows with Python 3.11 and
-3.14. Configure the workflow's status check as a required branch-protection
-check in the repository settings.
-
-## Contributing
-
-- Keep the evaluator deterministic and dependency-free.
-- Preserve the lifecycle gates: freeze, implement, review, repair, verify, and promote.
-- Keep reviewers and verifiers fresh and read-only.
-- Update the rubric, fixtures, and focused tests together when changing the trace contract.
-- Keep schemas v3/v4 readable and use schema v5 for new executable
-  implementation runs.
-- Require a persisted executable test artifact and a recorded red → green
-  cycle for every non-exempt implementation or repair assignment.
-- Require an adapter-backed, immutable line/branch coverage report and passing
-  configured thresholds for every non-exempt executable implementation or
-  repair assignment.
-- Keep token metrics descriptive; they must not cap, truncate, or block model dispatch.
-- Defer quality-delta measurement until the next explicitly versioned
-  prompt/harness comparison; never use token counts as a quality proxy.
-- Run the prompt validator for v3/v4, the report, and the focused tests (which
-  exercise v5) before submitting a change.
-- Do not mutate `.saturation/context.md` after it has been frozen for a run.
+- Keep the implementation core small and the quality actions reusable.
+- Prefer clean sessions, explicit scopes, and relevant style guidance.
+- Keep internal orchestration state ephemeral.
+- Let `evals` measure the harness without defining the product workflow.
+- Preserve unrelated user changes and never broaden a task silently.
+- Expose a concise final delivery rather than internal ceremony.

@@ -21,3 +21,8 @@ ENV/
 # Operating-system files
 .DS_Store
 Thumbs.db
+
+# Saturation runtime state is temporary; context.md is the only durable
+# orchestration artifact.
+.saturation/runs/
+.saturation/tmp/

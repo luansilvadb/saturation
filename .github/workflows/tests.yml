@@ -27,22 +27,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Validate v3 prompt contract
-        run: >-
-          python -B .agents/skills/saturation/evals/prompt_contract.py
-          --trace .agents/skills/saturation/evals/traces/complete.json
-          --root .
-
-      - name: Validate v4 prompt contract
-        run: >-
-          python -B .agents/skills/saturation/evals/prompt_contract.py
-          --trace .agents/skills/saturation/evals/traces_v4/complete.json
-          --root .
-
-      - name: Grade all traces
-        run: python -B .agents/skills/saturation/evals/report.py
-
-      - name: Run focused tests
+      - name: Run in-memory evaluator tests
         run: python -B .agents/skills/saturation/evals/test_grader.py
 
       - name: Run quality comparison tests
