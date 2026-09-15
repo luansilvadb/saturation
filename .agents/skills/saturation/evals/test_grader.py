@@ -95,6 +95,15 @@ class GraderTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "pass")
 
+    def test_additive_event_kinds_and_fields_are_ignored(self) -> None:
+        events = _events()
+        events[0]["future_field"] = "ignored"
+        events.insert(1, {"kind": "future_metric", "value": 1})
+
+        result = grader.evaluate_events(events)
+
+        self.assertEqual(result["status"], "pass")
+
     def test_runtime_artifacts_are_rejected_when_persisted(self) -> None:
         events = _events()
         events.append(

@@ -118,6 +118,18 @@ The evaluator owns metrics, comparisons, and evaluation fixtures. Evaluation
 logic must not require the normal `/saturation` invocation to write prompts,
 traces, reports, or scores into the product repository.
 
+The observation contract is optional and one-way: `saturation` emits a small,
+neutral set of structured runtime events, and `evals` consumes snapshots of
+those events. The runtime owns event emission; `evals` owns event validation,
+metrics, and comparisons. Events contain only redacted metadata needed for
+evaluation, such as statuses, opaque IDs, normalized scopes, guide names, and
+changed paths; they must not contain prompt text, transcripts, tool output,
+secrets, credentials, unnecessary PII, or private reasoning.
+
+Consumers may ignore additive event kinds and fields. A breaking change to the
+event contract requires an explicit contract version and corresponding tests;
+it must not make the normal runtime depend on a persisted evaluator schema.
+
 Evaluation failures may identify a harness regression, but they do not change
 the user's task or silently expand the implementation scope.
 

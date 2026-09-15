@@ -40,6 +40,17 @@ The event list stays in memory. The useful event kinds are:
 - `integrated` with `complete` status and final changed paths;
 - `durable_path` when an observer wants to assert what reached disk.
 
+The hook is optional and one-way. `saturation` owns emission of this small,
+neutral event vocabulary; `evals` owns validation, metrics, and comparisons.
+Observation payloads are redacted metadata only: statuses, opaque IDs,
+normalized repository-relative scopes, guide names, and changed paths. They do
+not carry prompts, transcripts, tool output, secrets, credentials, unnecessary
+PII, or private reasoning.
+
+The evaluator may ignore additive event kinds and fields. Breaking changes to
+the event contract require an explicit version and tests, while the normal
+runtime must remain independent of persisted evaluator schemas.
+
 ## Run the tests
 
 From the repository root:
