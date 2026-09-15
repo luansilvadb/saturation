@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import prompt_contract
+import token_metrics
 
 
 SCHEMA_VERSION = 3
@@ -152,6 +153,8 @@ CRITERIA = (
     ("prompt_contract", "prompt composition and trace contract"),
 )
 MAX_SCORE = len(CRITERIA) * 10
+QUALITY_COMPARISON_STATUS = "deferred"
+QUALITY_COMPARISON_REASON = "future_versioned_outcome_comparison_required"
 
 
 def load_trace(path: Path) -> Dict[str, Any]:
@@ -1668,6 +1671,20 @@ def _metric_number(value: Any) -> Optional[float]:
     return int(number) if number.is_integer() else round(number, 3)
 
 
+def _quality_comparison() -> Dict[str, Any]:
+    """Return the fixed v3 quality-comparison status.
+
+    Quality claims in optional evaluation data are intentionally not read.
+    A measured delta needs a future versioned contract with observed outcomes.
+    """
+
+    return {
+        "status": QUALITY_COMPARISON_STATUS,
+        "quality_delta": None,
+        "reason": QUALITY_COMPARISON_REASON,
+    }
+
+
 def _percentile(values: Sequence[float], fraction: float) -> Optional[float]:
     if not values:
         return None
@@ -1730,6 +1747,8 @@ def _prompt_metrics(trace: Any) -> Dict[str, Any]:
         "prompt_count": len(prompts),
         "attempt_count": len(attempts),
         "repair_count": repair_count,
+        "quality_comparison": _quality_comparison(),
+        "tokens": token_metrics.build_metrics(trace),
         "pcp": {
             "total": _metric_number(sum(pcp_values)) if pcp_values else 0,
             "average": average,
@@ -1742,6 +1761,78 @@ def _prompt_metrics(trace: Any) -> Dict[str, Any]:
         "strategy_counts": dict(sorted(strategy_counts.items())),
         "gate_failures": dict(sorted(gate_failures.items())),
         "chain_aggregates": dict(sorted(chain_aggregates.items())),
+    }
+
+
+def _aggregate_token_metrics(results: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Aggregate descriptive token metrics without affecting expectations."""
+
+    estimated_dispatched: List[Dict[str, Any]] = []
+    estimated_attempts: List[Dict[str, Any]] = []
+    observed_rows: List[Dict[str, Any]] = []
+    observed_statuses: Dict[str, int] = {}
+    observed_profiles = set()
+
+    for result in results:
+        metrics = _mapping(result.get("metrics"))
+        tokens = _mapping(metrics.get("tokens"))
+        estimated = _mapping(tokens.get("estimated"))
+        estimated_dispatched.extend(
+            item
+            for item in _list(_mapping(estimated.get("dispatched")).get("records"))
+            if isinstance(item, dict)
+        )
+        estimated_attempts.extend(
+            item
+            for item in _list(_mapping(estimated.get("attempts")).get("records"))
+            if isinstance(item, dict)
+        )
+
+        observed = _mapping(tokens.get("observed"))
+        status = observed.get("status", "not_available")
+        if not isinstance(status, str):
+            status = "invalid"
+        observed_statuses[status] = observed_statuses.get(status, 0) + 1
+        observed_rows.extend(
+            item
+            for item in _list(_mapping(observed.get("dispatched")).get("records"))
+            if isinstance(item, dict)
+        )
+        profile = tuple(
+            observed.get(field)
+            for field in ("measurement_scope", "provider", "model", "encoding")
+        )
+        if status == "available" and all(value is not None for value in profile):
+            observed_profiles.add(profile)
+
+    if not observed_statuses or set(observed_statuses) == {"not_available"}:
+        observed_status = "not_available"
+    elif set(observed_statuses) == {"available"}:
+        observed_status = "available"
+    elif set(observed_statuses) == {"invalid"}:
+        observed_status = "invalid"
+    else:
+        observed_status = "partial"
+
+    return {
+        "estimated": {
+            "estimator": token_metrics.ESTIMATOR_ID,
+            "measurement_scope": token_metrics.ESTIMATOR_SCOPE,
+            "dispatched": token_metrics.summarize_rows(
+                estimated_dispatched, include_records=False
+            ),
+            "attempts": token_metrics.summarize_rows(
+                estimated_attempts, include_records=False
+            ),
+        },
+        "observed": {
+            "status": observed_status,
+            "trace_status_counts": dict(sorted(observed_statuses.items())),
+            "profile_count": len(observed_profiles),
+            "dispatched": token_metrics.summarize_rows(
+                observed_rows, include_records=False
+            ),
+        },
     }
 
 
@@ -1793,6 +1884,8 @@ def _aggregate_prompt_metrics(results: Sequence[Dict[str, Any]]) -> Dict[str, An
         "pcp_max": _metric_number(max(pcp_values)) if pcp_values else None,
         "pcp_warnings": warnings,
         "pcp_exceptions": exceptions,
+        "quality_comparison": _quality_comparison(),
+        "tokens": _aggregate_token_metrics(results),
         "strategy_counts": dict(sorted(strategy_counts.items())),
         "gate_failures": dict(sorted(gate_failures.items())),
     }
@@ -2010,6 +2103,27 @@ def _format_report(payload: Dict[str, Any]) -> str:
             metrics.get("pcp_exceptions", 0),
             metrics.get("repair_count", 0),
         )
+    )
+    tokens = _mapping(metrics.get("tokens"))
+    estimated = _mapping(tokens.get("estimated"))
+    estimated_dispatched = _mapping(estimated.get("dispatched"))
+    estimated_attempts = _mapping(estimated.get("attempts"))
+    observed = _mapping(tokens.get("observed"))
+    lines.append(
+        "TOKENS: estimator=%s scope=%s estimated_dispatched=%s "
+        "estimated_attempts=%s observed=%s"
+        % (
+            estimated.get("estimator", token_metrics.ESTIMATOR_ID),
+            estimated.get("measurement_scope", token_metrics.ESTIMATOR_SCOPE),
+            estimated_dispatched.get("total", 0),
+            estimated_attempts.get("total", 0),
+            observed.get("status", "not_available"),
+        )
+    )
+    quality_comparison = _mapping(metrics.get("quality_comparison"))
+    lines.append(
+        "QUALITY: comparison=%s"
+        % quality_comparison.get("status", QUALITY_COMPARISON_STATUS)
     )
     if payload.get("error"):
         lines.append("ERROR: " + payload["error"])

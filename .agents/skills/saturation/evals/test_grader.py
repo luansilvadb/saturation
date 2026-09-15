@@ -9,6 +9,7 @@ TRACES_DIR = EVALS_DIR / "traces"
 sys.path.insert(0, str(EVALS_DIR))
 import grader  # noqa: E402
 import prompt_contract  # noqa: E402
+import token_metrics  # noqa: E402
 
 
 class GraderTests(unittest.TestCase):
@@ -283,6 +284,168 @@ class GraderTests(unittest.TestCase):
             prompt_contract.prompt_sha256(normalized),
         )
 
+    def test_complete_reports_estimated_input_tokens_by_phase(self):
+        result = self.grade("complete.json")
+        tokens = result["metrics"]["tokens"]
+        estimated = tokens["estimated"]
+        dispatched = estimated["dispatched"]
+
+        self.assertEqual(estimated["estimator"], token_metrics.ESTIMATOR_ID)
+        self.assertEqual(
+            estimated["measurement_scope"], token_metrics.ESTIMATOR_SCOPE
+        )
+        self.assertEqual(dispatched["count"], 5)
+        self.assertEqual(dispatched["total"], 1960)
+        self.assertEqual(
+            {
+                phase: values["total"]
+                for phase, values in dispatched["by_phase"].items()
+            },
+            {
+                "implement": 388,
+                "review": 392,
+                "repair": 386,
+                "verify": 395,
+                "final_review": 399,
+            },
+        )
+        self.assertEqual(estimated["attempts"]["total"], 0)
+        self.assertEqual(tokens["observed"]["status"], "not_available")
+
+    def test_token_estimator_uses_canonical_utf8_bytes(self):
+        text = "\r\n  café\t\r\n"
+        normalized = prompt_contract.normalize_prompt(text)
+        expected = max(1, (len(normalized.encode("utf-8")) + 3) // 4)
+        self.assertEqual(token_metrics.estimate_input_tokens(text), expected)
+
+    def test_extra_prompt_text_changes_tokens_without_changing_quality_grade(self):
+        trace = copy.deepcopy(self.complete)
+        prompt = trace["prompts"][0]
+        prompt["rendered_prompt"] += (
+            "This additional quality-preserving note is observable evidence.\n"
+        )
+        prompt["normalized_sha256"] = prompt_contract.prompt_sha256(
+            prompt["rendered_prompt"]
+        )
+
+        result = grader.grade_trace(trace, "token-growth")
+
+        self.assertEqual(
+            (result["decision"], result["score"], result["grade"]),
+            ("ACCEPT", 110, "A"),
+        )
+        self.assertGreater(
+            result["metrics"]["tokens"]["estimated"]["dispatched"]["total"],
+            1960,
+        )
+
+    def assert_quality_claim_is_deferred(self, direction):
+        trace = copy.deepcopy(self.complete)
+        trace["evaluation"] = {
+            "quality_comparison": {
+                "baseline_version": 3,
+                "candidate_version": 3,
+                "quality_delta": direction,
+            }
+        }
+
+        result = grader.grade_trace(trace, "same-version-quality-claim")
+        comparison = result["metrics"]["quality_comparison"]
+
+        self.assertEqual(
+            (result["decision"], result["score"], result["grade"]),
+            ("ACCEPT", 110, "A"),
+        )
+        self.assertEqual(comparison["status"], "deferred")
+        self.assertIsNone(comparison["quality_delta"])
+        self.assertEqual(
+            comparison["reason"],
+            grader.QUALITY_COMPARISON_REASON,
+        )
+
+    def test_same_version_quality_increase_is_deferred(self):
+        self.assert_quality_claim_is_deferred("increase")
+
+    def test_same_version_quality_decrease_is_deferred(self):
+        self.assert_quality_claim_is_deferred("decrease")
+
+    def test_observed_token_usage_is_optional_and_model_scoped(self):
+        trace = copy.deepcopy(self.complete)
+        trace["evaluation"] = {
+            "token_usage": {
+                "version": 1,
+                "records": [
+                    {
+                        "prompt_id": prompt["prompt_id"],
+                        "input_tokens": 1000 + index,
+                        "measurement_scope": "api_request",
+                        "provider": "test-provider",
+                        "model": "test-model",
+                        "encoding": "test-encoding",
+                    }
+                    for index, prompt in enumerate(trace["prompts"])
+                ],
+            }
+        }
+
+        result = grader.grade_trace(trace, "observed-tokens")
+        observed = result["metrics"]["tokens"]["observed"]
+
+        self.assertEqual(result["decision"], "ACCEPT")
+        self.assertEqual(observed["status"], "available")
+        self.assertEqual(observed["measurement_scope"], "api_request")
+        self.assertEqual(observed["model"], "test-model")
+        self.assertEqual(observed["dispatched"]["total"], 5010)
+
+    def test_invalid_observed_usage_does_not_change_quality_grade(self):
+        trace = copy.deepcopy(self.complete)
+        trace["evaluation"] = {
+            "token_usage": {
+                "version": 1,
+                "records": [
+                    {
+                        "prompt_id": trace["prompts"][0]["prompt_id"],
+                        "input_tokens": 1000,
+                        "measurement_scope": "api_request",
+                        "provider": "test-provider",
+                        "model": "test-model",
+                        "encoding": "test-encoding",
+                    }
+                ],
+            }
+        }
+
+        result = grader.grade_trace(trace, "partial-observed-tokens")
+        observed = result["metrics"]["tokens"]["observed"]
+
+        self.assertEqual(
+            (result["decision"], result["score"], result["grade"]),
+            ("ACCEPT", 110, "A"),
+        )
+        self.assertEqual(observed["status"], "invalid")
+        self.assertEqual(len(observed["missing_prompt_ids"]), 4)
+        self.assertTrue(observed["errors"])
+
+    def test_attempt_tokens_are_reported_separately(self):
+        trace = copy.deepcopy(self.complete)
+        trace["prompt_attempts"] = [
+            {
+                "attempt_id": "A-token-test",
+                "handoff_event_id": "E-002",
+                "rendered_prompt": trace["prompts"][0]["rendered_prompt"],
+            }
+        ]
+
+        metrics = grader._prompt_metrics(trace)
+        tokens = metrics["tokens"]
+
+        self.assertEqual(tokens["estimated"]["dispatched"]["total"], 1960)
+        self.assertEqual(tokens["estimated"]["attempts"]["total"], 388)
+        self.assertEqual(
+            tokens["estimated"]["attempts"]["by_phase"]["implement"]["total"],
+            388,
+        )
+
     def test_prompt_heading_mutation_is_rejected(self):
         def mutation(trace):
             prompt = trace["prompts"][0]
@@ -485,6 +648,23 @@ class GraderTests(unittest.TestCase):
         self.assertFalse(result["schema_valid"])
         self.assertEqual(result["decision"], "REJECT")
 
+    def test_token_metrics_tolerate_malformed_top_level_lists(self):
+        trace = copy.deepcopy(self.complete)
+        trace["prompts"] = None
+        trace["prompt_attempts"] = None
+
+        result = grader.grade_trace(trace, "malformed-token-input")
+
+        self.assertEqual(result["decision"], "REJECT")
+        self.assertEqual(
+            result["metrics"]["tokens"]["estimated"]["dispatched"]["total"],
+            0,
+        )
+        self.assertEqual(
+            result["metrics"]["tokens"]["estimated"]["attempts"]["total"],
+            0,
+        )
+
     def test_cli_passes_and_prints_summary(self):
         completed = subprocess.run(
             [
@@ -505,6 +685,8 @@ class GraderTests(unittest.TestCase):
             completed.stdout + completed.stderr,
         )
         self.assertIn("SUMMARY: PASS", completed.stdout)
+        self.assertIn("TOKENS: ", completed.stdout)
+        self.assertIn("QUALITY: comparison=deferred", completed.stdout)
 
 
 if __name__ == "__main__":

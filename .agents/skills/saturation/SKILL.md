@@ -27,6 +27,18 @@ tool call, using `null` for direct calls without a prompt. Keep dispatched
 prompts immutable; repair a semantic prompt defect with a new prompt,
 handoff, and fresh session.
 
+Token telemetry is descriptive and must not limit model capability. When a
+provider exposes input usage, record optional `evaluation.token_usage` version
+1 data keyed by `prompt_id`, with the provider, model, encoding, and declared
+measurement scope. The deterministic fixture estimate uses the normalized
+rendered prompt and the `utf8_bytes_div4_v1` proxy. Never truncate a prompt,
+skip a dispatch, or change quality decisions because of token count; interpret
+token usage as descriptive telemetry only. The current prompt/harness version
+must not measure or infer a quality increase or decrease from token counts,
+PCP, workflow grades, or other same-version signals. Defer quality deltas to
+the next explicitly versioned prompt/harness comparison, which must identify
+baseline and candidate versions and record real outcome observations.
+
 Split the work into coherent and disjoint assignments, each with an owner,
 `read_scope`, and `write_scope` relative to the repository. `read_scope`
 contains the frozen context, the complete selected style modules, and only

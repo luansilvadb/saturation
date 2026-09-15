@@ -144,9 +144,62 @@ as assertions and never override the grade.
 
 The report also emits descriptive, non-decisive metrics: prompt and attempt
 counts, repair count, PCP average/max/percentiles, warning and exception
-counts, strategy distribution, gate failures, and chain aggregates where
-applicable. Synthetic fixtures do not invent benchmark outcome statistics; an
-optional `evaluation` object is reserved for real benchmark runs.
+counts, strategy distribution, gate failures, chain aggregates where
+applicable, and prompt-input token usage. Synthetic fixtures do not invent
+benchmark outcome statistics.
+
+## Token telemetry
+
+Token metrics are observational only. They never cap, truncate, skip, or
+otherwise change a dispatch, and they never change the 110-point workflow
+grade. The fixture estimate is calculated from each normalized
+`rendered_prompt` using the versioned `utf8_bytes_div4_v1` proxy:
+
+```text
+max(1, ceil(len(normalized_rendered_prompt.encode("utf-8")) / 4))
+```
+
+Dispatched prompts are aggregated per prompt, phase, and trace. Blocked
+`prompt_attempts` are measured separately because they are composed but not
+sent to an actor. The report exposes totals, averages, maxima, p50, p95, and
+phase breakdowns for both groups.
+
+Real provider measurements are optional and can be attached without changing
+the v3 prompt records:
+
+```json
+{
+  "evaluation": {
+    "token_usage": {
+      "version": 1,
+      "records": [
+        {
+          "prompt_id": "P-001",
+          "input_tokens": 412,
+          "measurement_scope": "api_request",
+          "provider": "provider-name",
+          "model": "model-name",
+          "encoding": "encoding-name"
+        }
+      ]
+    }
+  }
+}
+```
+
+Observed usage is authoritative for its declared provider scope; it is not
+required for ordinary fixtures, and it is not expected to equal the portable
+estimate. Missing or invalid optional telemetry is reported as unavailable or
+invalid without changing the workflow grade. The current prompt/harness
+version does not measure a quality increase or decrease, and token counts are
+not a quality proxy. That comparison is deferred to the next explicitly
+versioned prompt/harness, which must provide baseline and candidate version
+identities plus real observed outcomes.
+
+Every graded result and the aggregate report expose this boundary as
+`metrics.quality_comparison` with `status: "deferred"`, `quality_delta: null`,
+and reason `future_versioned_outcome_comparison_required`. This field is a
+guardrail, not a quality score.
 
 ## Regression matrix
 

@@ -71,6 +71,7 @@ flowchart TD
 └── evals/
     ├── prompt_contract.py      # Prompt contract and PCP validator
     ├── grader.py               # Trace schema and behavioral grader
+    ├── token_metrics.py        # Descriptive prompt-input token metrics
     ├── report.py               # Portable command-line entry point
     ├── rubric.json             # Grading criteria and fixture matrix
     ├── test_grader.py          # Focused unit tests
@@ -105,7 +106,14 @@ to grade another directory of direct JSON trace files. Prompt-aware traces use
 schema v3 and include rendered prompt evidence, strict module manifests, PCP,
 and quality gates. The prompt validator can independently verify the canonical
 prompt contract and module hashes; the report also emits descriptive PCP,
-strategy, gate, attempt, and repair metrics that do not alter acceptance.
+strategy, gate, attempt, repair, and prompt-input token metrics that do not
+alter acceptance. Fixture token estimates use the versioned
+`utf8_bytes_div4_v1` proxy; optional provider observations are recorded under
+`evaluation.token_usage` and are model/tokenizer scoped. The current version
+does not measure quality increases or decreases; that requires a future
+versioned prompt/harness comparison with baseline and candidate outcomes.
+Reports expose this boundary as `metrics.quality_comparison.status=deferred`
+with no quality delta.
 
 ## Contributing
 
@@ -113,5 +121,8 @@ strategy, gate, attempt, and repair metrics that do not alter acceptance.
 - Preserve the lifecycle gates: freeze, implement, review, repair, verify, and promote.
 - Keep reviewers and verifiers fresh and read-only.
 - Update the rubric, fixtures, and focused tests together when changing the trace contract.
+- Keep token metrics descriptive; they must not cap, truncate, or block model dispatch.
+- Defer quality-delta measurement until the next explicitly versioned
+  prompt/harness comparison; never use token counts as a quality proxy.
 - Run both evaluation commands before submitting a change.
 - Do not mutate `.saturation/context.md` after it has been frozen for a run.
