@@ -4,7 +4,7 @@ These deterministic, standard-library-only evals grade the observable
 workflow of the `saturation` skill: frozen context, scoped assignments, fresh
 handoffs, independent review, repair/reverification, escalation, completion
 gates, the versioned prompt contract, and (for new implementation traces) the
-test-first red/green workflow.
+test-first red/green workflow plus instrumented line/branch coverage.
 
 ## Evaluation flow
 
@@ -39,7 +39,8 @@ python .agents/skills/saturation/evals/test_grader.py
 
 The prompt validator accepts `--json` for machine-readable errors. The report
 accepts `--traces DIR` and `--json`; without `--traces` it grades both the v3
-and v4 fixture directories. It exits 0 only when all fixtures match their
+and v4 fixture directories. New implementation traces use schema v5. It exits
+0 only when all fixtures match their
 declared expectations and every `ACCEPT` reaches the exact maximum score with
 grade `A`.
 
@@ -128,12 +129,14 @@ Prompt text normalization is deterministic: CRLF/CR to LF, Unicode NFC,
 trailing line-ending whitespace removed, edge blank lines removed, exactly one
 final LF, then UTF-8 lowercase SHA-256. The validator recalculates the hash.
 
-## TDD policy v1 and trace schema v4
+## TDD policy v1 and coverage policy v1
 
-New implementation and repair traces use schema v4 and declare
-`trace_contract.tdd` as `tdd-v1`. The v4 grader preserves the 11 v3 workflow
-criteria and adds `tdd_workflow`, for an exact `120/120 A` acceptance. Existing
-v3 traces remain valid at `110/110 A` and are not retrofitted with TDD fields.
+New implementation and repair traces use schema v5. Schema v4 remains readable
+as the historical TDD format, while schema v5 declares both
+`trace_contract.tdd` as `tdd-v1` and `trace_contract.coverage` as `coverage-v1`.
+The v5 grader preserves the 11 base workflow criteria and adds
+`tdd_workflow` and `coverage_workflow`, for an exact `130/130 A` acceptance.
+Existing v3/v4 traces remain valid and are not retrofitted with coverage fields.
 
 The required TDD ledger records:
 
@@ -168,6 +171,28 @@ TDD metrics are descriptive and include cycle, red, green, waiver, blocker,
 and retry counts; they do not alter the decision outside the `tdd_workflow`
 criterion.
 
+The required coverage ledger records:
+
+- a language-agnostic adapter ID, language, tool, and tool version;
+- both line and branch metrics, with configurable thresholds of at least 80%
+  for each metric;
+- the instrumented regression command, executable source paths, report format,
+  and an immutable report path inside the declared write scope;
+- target and independent verifier coverage runs, linked to the existing
+  regression runs and their evidence. Target regression writes the report;
+  verifier regression reads and independently validates it;
+- normalized metrics that meet both thresholds. Missing, stale, malformed, or
+  below-threshold reports fail `coverage_workflow` and block promotion.
+
+The harness does not hard-code one coverage tool. Each language ecosystem must
+provide an adapter that runs its native instrumenter and normalizes the report
+into the coverage-v1 fields. This keeps the contract universal without
+pretending that line/branch formats are identical across languages.
+
+Coverage percentage is a maintenance gate, not proof that tests are meaningful;
+acceptance mapping, red/green evidence, and independent verification remain
+required.
+
 ## Trace schema and grading
 
 Schema v3 requires a strict `trace_contract` containing the workflow
@@ -178,27 +203,31 @@ unique causal sequence. Handoffs use typed `context`, `assignment`, `state`,
 `input`, `output`, `error`, `stop`, `evidence`, and `fresh_session` fields.
 
 Schema v4 retains that contract and adds the exact `tdd` ledger described
-above. Its prompt catalog adds one `test_first.v1` record; the other phase
-contracts remain the v3 contracts. The v4 verifier criteria include
-`tdd_workflow`.
+above. Schema v5 retains the v4 prompt catalog and adds the exact
+`coverage-v1` declaration and ledger. Its verifier criteria include both
+`tdd_workflow` and `coverage_workflow`.
 
 The verifier is fresh, independent, read-only, and must cover the four base
 dimensions (`completeness`, `clarity`, `consistency`, `testability`), any
-declared optional dimensions, and all rubric criteria: 11 for v3 and 12 for
-v4, including `prompt_contract` and (in v4) `tdd_workflow`. Review events
+declared optional dimensions, and all rubric criteria: 11 for v3, 12 for v4,
+and 13 for v5, including `prompt_contract`, `tdd_workflow`, and (in v5)
+`coverage_workflow`. Review events
 cover every prompt and blocked attempt and acknowledge every PCP warning.
 
-There are 11 v3 criteria worth 10 points each and 12 v4 criteria after adding
-`tdd_workflow`. Acceptance is exact: v3 `ACCEPT` requires `110/110` and v4
-`ACCEPT` requires `120/120`, both with grade `A`; any failed criterion produces
-`REJECT`.
+There are 11 v3 criteria worth 10 points each, 12 v4 criteria after adding
+`tdd_workflow`, and 13 v5 criteria after adding `coverage_workflow`.
+Acceptance is exact: v3 `ACCEPT` requires `110/110`, v4 `ACCEPT` requires
+`120/120`, and v5 `ACCEPT` requires `130/130`, all with grade `A`; any failed
+criterion produces `REJECT`.
 Fixture fields `expected_decision` and `expected_failed_criteria` are checked
 as assertions and never override the grade.
 
-The report also emits descriptive, non-decisive metrics: prompt and attempt
-counts, repair count, PCP average/max/percentiles, warning and exception
-counts, strategy distribution, gate failures, chain aggregates where
-applicable, and prompt-input token usage. Synthetic fixtures do not invent
+The report also emits descriptive metrics for TDD and coverage alongside the
+existing non-decisive prompt and attempt counts, repair count, PCP
+average/max/percentiles, warning and exception counts, strategy distribution,
+gate failures, chain aggregates where applicable, and prompt-input token usage.
+Coverage validity is decisive through `coverage_workflow`; its percentages are
+not a quality-delta claim. Synthetic fixtures do not invent
 benchmark outcome statistics.
 
 ## Token telemetry

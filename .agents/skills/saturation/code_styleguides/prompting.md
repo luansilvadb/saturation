@@ -18,9 +18,9 @@ governs how their relevant rules become an agent prompt.
     then dispatch. A failed pre-dispatch check blocks dispatch.
 -   Keep a dispatched prompt immutable. A change to its scope, modules,
     strategy, contract, or wording requires a new prompt and hash.
--   New implementation runs use trace schema v4 and add the bounded
-    `test_first` phase; schema v3 remains the compatibility format for
-    historical traces.
+-   New implementation runs use trace schema v5 and add the bounded
+    `test_first` phase plus mandatory instrumented coverage; schemas v3 and v4
+    remain compatibility formats for historical traces.
 
 ## Canonical prompt shape
 
@@ -162,13 +162,22 @@ The declared phase contracts and their minimum actor keys are:
 When a phase needs additional fields, extend the declared contract in a new
 policy/schema version; do not silently invent a prose-only substitute. Schema
 v4 adds `test_first.v1` for the test-artifact phase while retaining the v3
-contracts for the other phases.
+contracts for the other phases. Schema v5 retains those contracts and adds the
+`coverage-v1` trace contract.
 
 The `test_first.v1` actor result contains exactly these minimum keys:
 `tool_call_ref`, `handoff_ref`, `cycle_id`, `mode`, `test_artifact_paths`, and
 `red_run`. The test-first actor writes only the declared test artifacts; the
 orchestrator records the red run and opens the implementation handoff only
 after that run passes the TDD gate.
+
+For schema v5, the implementation regression command must also run through a
+declared language coverage adapter. It must instrument both line and branch
+coverage, write an immutable report inside the assignment's write scope, and
+record normalized metrics and source paths in the `coverage-v1` block. The
+adapter may be language-specific, but the trace fields and promotion gate are
+language-agnostic. The fresh verifier must independently execute or validate
+the instrumented regression and report.
 
 ## Prompt Complexity Points (PCP)
 

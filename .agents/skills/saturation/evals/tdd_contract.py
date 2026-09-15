@@ -212,13 +212,22 @@ def _expected_declaration() -> Dict[str, Any]:
     }
 
 
-def _contract_errors(trace: Mapping[str, Any]) -> List[str]:
+def _contract_errors(
+    trace: Mapping[str, Any],
+    *,
+    schema_version: int = SCHEMA_VERSION,
+    contract_extensions: Optional[Mapping[str, Any]] = None,
+    extra_criteria: Sequence[str] = (),
+) -> List[str]:
     contract = _mapping(trace.get("trace_contract"))
     errors: List[str] = []
-    if set(contract) != {"version", "causal_links", "handoff", "verifier", "prompt", "tdd"}:
-        errors.append("trace_contract must contain the fixed v4 declarations")
-    if contract.get("version") != SCHEMA_VERSION:
-        errors.append("trace_contract.version must be 4")
+    expected_contract_fields = {"version", "causal_links", "handoff", "verifier", "prompt", "tdd"}
+    extensions = dict(contract_extensions or {})
+    expected_contract_fields.update(extensions)
+    if set(contract) != expected_contract_fields:
+        errors.append("trace_contract must contain the fixed TDD declarations")
+    if contract.get("version") != schema_version:
+        errors.append("trace_contract.version must be %s" % schema_version)
     if contract.get("causal_links") != "bidirectional":
         errors.append("trace_contract.causal_links must be bidirectional")
 
@@ -258,17 +267,31 @@ def _contract_errors(trace: Mapping[str, Any]) -> List[str]:
             "escalation",
             "prompt_contract",
             TDD_CRITERION[0],
-        ]
+        ] + list(extra_criteria)
         if verifier.get("criteria") != expected_criteria:
-            errors.append("trace_contract.verifier.criteria are not canonical v4 criteria")
+            errors.append("trace_contract.verifier.criteria are not canonical TDD criteria")
 
     if contract.get("tdd") != _expected_declaration():
         errors.append("trace_contract.tdd is not the canonical tdd-v1 declaration")
+    for field, expected in extensions.items():
+        if contract.get(field) != expected:
+            errors.append("trace_contract.%s is not canonical" % field)
     return errors
 
 
-def _declaration_valid(trace: Mapping[str, Any]) -> bool:
-    return not _contract_errors(trace)
+def _declaration_valid(
+    trace: Mapping[str, Any],
+    *,
+    schema_version: int = SCHEMA_VERSION,
+    contract_extensions: Optional[Mapping[str, Any]] = None,
+    extra_criteria: Sequence[str] = (),
+) -> bool:
+    return not _contract_errors(
+        trace,
+        schema_version=schema_version,
+        contract_extensions=contract_extensions,
+        extra_criteria=extra_criteria,
+    )
 
 
 def _validate_command(command: Any, expected: Optional[Mapping[str, Any]] = None) -> bool:
@@ -443,7 +466,14 @@ def _valid_run(
         or payload.get("tool_call_ref") != source.get("call_id")
     ):
         return False
-    if source.get("writes"):
+    allowed_writes = set()
+    if trace.get("schema_version") == 5 and kind == "regression":
+        coverage = trace.get("coverage")
+        report = coverage.get("report") if isinstance(coverage, dict) else None
+        report_path = report.get("path") if isinstance(report, dict) else None
+        if isinstance(report_path, str) and report_path:
+            allowed_writes.add(report_path)
+    if set(_list(source.get("writes"))) - allowed_writes:
         return False
     return True
 
@@ -718,27 +748,51 @@ def _valid_test_first_prompt(trace: Mapping[str, Any]) -> bool:
     )
 
 
-def validate_v4_trace(trace: Any) -> List[str]:
-    """Return structural v4 errors without turning semantic TDD gaps into schema errors."""
+def validate_tdd_trace(
+    trace: Any,
+    *,
+    schema_version: int = SCHEMA_VERSION,
+    contract_extensions: Optional[Mapping[str, Any]] = None,
+    extra_criteria: Sequence[str] = (),
+) -> List[str]:
+    """Return structural TDD errors without turning semantic gaps into schema errors."""
 
     if not isinstance(trace, dict):
         return ["root must be an object"]
     errors: List[str] = []
-    if trace.get("schema_version") != SCHEMA_VERSION:
-        errors.append("schema_version must be 4")
+    if trace.get("schema_version") != schema_version:
+        errors.append("schema_version must be %s" % schema_version)
     from grader import legacy_projection, validate_trace
 
     legacy_errors = validate_trace(legacy_projection(trace))
     errors.extend("legacy: " + error for error in legacy_errors)
-    errors.extend(_contract_errors(trace))
+    errors.extend(
+        _contract_errors(
+            trace,
+            schema_version=schema_version,
+            contract_extensions=contract_extensions,
+            extra_criteria=extra_criteria,
+        )
+    )
     tdd = trace.get("tdd")
     if not isinstance(tdd, dict) or set(tdd) != set(TDD_FIELDS):
         errors.append("tdd must contain the exact tdd-v1 fields")
     return errors
 
 
-def grade_tdd(trace: Mapping[str, Any]) -> Dict[str, Any]:
-    """Grade the hard TDD workflow criterion for a v4 trace."""
+def validate_v4_trace(trace: Any) -> List[str]:
+    """Return structural v4 errors without turning semantic TDD gaps into schema errors."""
+
+    return validate_tdd_trace(trace)
+
+
+def grade_tdd(
+    trace: Mapping[str, Any],
+    *,
+    contract_extensions: Optional[Mapping[str, Any]] = None,
+    extra_criteria: Sequence[str] = (),
+) -> Dict[str, Any]:
+    """Grade the hard TDD workflow criterion for a current TDD trace."""
 
     from grader import _result
 
@@ -769,8 +823,18 @@ def grade_tdd(trace: Mapping[str, Any]) -> Dict[str, Any]:
         if required
         else not cycles and not _list(tdd.get("runs"))
     )
+    schema_version = trace.get("schema_version", SCHEMA_VERSION)
     checks = [
-        ("declaration", _declaration_valid(trace), "v4 trace and tdd-v1 declarations must be canonical"),
+        (
+            "declaration",
+            _declaration_valid(
+                trace,
+                schema_version=schema_version,
+                contract_extensions=contract_extensions,
+                extra_criteria=extra_criteria,
+            ),
+            "TDD trace and declarations must be canonical",
+        ),
         ("classification", tdd.get("classification") in TDD_CLASSIFICATIONS, "testability must be required or an approved exemption"),
         ("baseline", _valid_initial_worktree(tdd) if required else True, "baseline must start from a clean, non-overlapping worktree"),
         ("commands", _valid_commands(tdd) if required else True, "target and regression commands must be structured and side-effect-free"),

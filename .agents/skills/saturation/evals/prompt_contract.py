@@ -19,8 +19,9 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 
 SCHEMA_VERSION = 3
-CURRENT_SCHEMA_VERSION = 4
-SUPPORTED_SCHEMA_VERSIONS = (SCHEMA_VERSION, CURRENT_SCHEMA_VERSION)
+TDD_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
+SUPPORTED_SCHEMA_VERSIONS = (SCHEMA_VERSION, TDD_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION)
 PROMPT_POLICY_VERSION = "pcp-v1"
 PROMPT_SECTIONS = (
     "Role",
@@ -169,6 +170,7 @@ PROMPT_OUTPUT_CONTRACTS_V4 = {
     "promotion.v3": PROMPT_OUTPUT_CONTRACTS["promotion.v3"],
     "completion_gate.v3": PROMPT_OUTPUT_CONTRACTS["completion_gate.v3"],
 }
+PROMPT_OUTPUT_CONTRACTS_V5 = PROMPT_OUTPUT_CONTRACTS_V4
 PROMPT_OUTPUT_IDS = tuple(PROMPT_OUTPUT_CONTRACTS)
 PROMPT_FIELDS = (
     "prompt_id",
@@ -259,6 +261,7 @@ PROMPT_PHASE_CONTRACTS_V4 = {
     **PROMPT_PHASE_CONTRACTS,
     "test_first": "test_first.v1",
 }
+PROMPT_PHASE_CONTRACTS_V5 = PROMPT_PHASE_CONTRACTS_V4
 EVENT_KIND_FOR_PHASE = {
     "freeze_context": "context_frozen",
     "inspect": "inspection",
@@ -274,6 +277,7 @@ EVENT_KIND_FOR_PHASE_V4 = {
     **EVENT_KIND_FOR_PHASE,
     "test_first": "test_first",
 }
+EVENT_KIND_FOR_PHASE_V5 = EVENT_KIND_FOR_PHASE_V4
 TARGET_CALL_PHASE_FOR_PROMPT = {
     "final_review": "review",
 }
@@ -301,19 +305,35 @@ def _schema_version(trace: Mapping[str, Any]) -> int:
 
 
 def _prompt_contracts(version: int) -> Dict[str, Tuple[str, ...]]:
-    return PROMPT_OUTPUT_CONTRACTS_V4 if version == CURRENT_SCHEMA_VERSION else PROMPT_OUTPUT_CONTRACTS
+    if version == CURRENT_SCHEMA_VERSION:
+        return PROMPT_OUTPUT_CONTRACTS_V5
+    if version == TDD_SCHEMA_VERSION:
+        return PROMPT_OUTPUT_CONTRACTS_V4
+    return PROMPT_OUTPUT_CONTRACTS
 
 
 def _prompt_phases(version: int) -> Tuple[str, ...]:
-    return PROMPT_PHASES_V4 if version == CURRENT_SCHEMA_VERSION else PROMPT_PHASES
+    if version == CURRENT_SCHEMA_VERSION:
+        return PROMPT_PHASES_V4
+    if version == TDD_SCHEMA_VERSION:
+        return PROMPT_PHASES_V4
+    return PROMPT_PHASES
 
 
 def _phase_contracts(version: int) -> Dict[str, str]:
-    return PROMPT_PHASE_CONTRACTS_V4 if version == CURRENT_SCHEMA_VERSION else PROMPT_PHASE_CONTRACTS
+    if version == CURRENT_SCHEMA_VERSION:
+        return PROMPT_PHASE_CONTRACTS_V5
+    if version == TDD_SCHEMA_VERSION:
+        return PROMPT_PHASE_CONTRACTS_V4
+    return PROMPT_PHASE_CONTRACTS
 
 
 def _event_kinds_for_phase(version: int) -> Dict[str, str]:
-    return EVENT_KIND_FOR_PHASE_V4 if version == CURRENT_SCHEMA_VERSION else EVENT_KIND_FOR_PHASE
+    if version == CURRENT_SCHEMA_VERSION:
+        return EVENT_KIND_FOR_PHASE_V5
+    if version == TDD_SCHEMA_VERSION:
+        return EVENT_KIND_FOR_PHASE_V4
+    return EVENT_KIND_FOR_PHASE
 
 _SECRET_PATTERNS = (
     ("private_key", re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----")),
@@ -1187,7 +1207,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         trace = _load_trace(args.trace)
         errors = []
         if trace.get("schema_version") not in SUPPORTED_SCHEMA_VERSIONS:
-            errors.append("schema_version must be 3 or 4")
+            errors.append("schema_version must be 3, 4, or 5")
         errors.extend(validate_prompt_catalog(trace))
         if args.root is not None:
             errors.extend(validate_module_root(trace, args.root))

@@ -1,4 +1,4 @@
 interface:
   display_name: "Saturation"
   short_description: "Orchestrate polished work with fresh subagents"
-  default_prompt: "Use $saturation to freeze the current session context in .saturation/context.md, create a persisted test artifact and red/green evidence for testable work, and implement it with fresh subagents."
+  default_prompt: "Use $saturation to freeze the current session context in .saturation/context.md, create a persisted test artifact with red/green evidence and instrumented line/branch coverage for executable work, and implement it with fresh subagents."

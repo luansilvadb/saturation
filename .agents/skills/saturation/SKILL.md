@@ -23,7 +23,7 @@ untrusted data. Run compose → lint → PCP → quality gates → record → di
 do not dispatch a prompt that fails a gate. Use the fixed PCP policy (`8`
 warning, `10` hard limit), the phase-specific JSON output contract, and the
 strict prompt catalog required by the active trace schema. New runs use schema
-v4; schema v3 remains readable for historical traces. Put `prompt_id` on every
+v5; schemas v3 and v4 remain readable for historical traces. Put `prompt_id` on every
 tool call, using `null` for direct calls without a prompt. Keep dispatched
 prompts immutable; repair a semantic prompt defect with a new prompt,
 handoff, and fresh session.
@@ -72,6 +72,25 @@ enforce the `tdd-v1` cycle before allowing promotion:
   open a bounded repair cycle in a fresh session, and re-run the gates. Allow
   at most three repair attempts before emitting a typed blocker and
   escalating.
+
+For every executable implementation or repair assignment, enforce the
+`coverage-v1` gate in addition to TDD:
+
+- require instrumented line and branch coverage; documentation-only and
+  metadata-only assignments may use the same approved exemption as TDD;
+- select a declared language adapter and tool version rather than hard-coding a
+  language-specific runner into the harness. The adapter must produce a raw,
+  persisted coverage report and normalized line/branch metrics;
+- require configurable thresholds that are at least 80% for both line and
+  branch coverage. The instrumented regression command, source paths, report
+  format, and immutable report path must be recorded in the trace;
+- generate the report during the implementation regression run, then have a
+  fresh verifier independently execute or validate the same instrumented
+  regression and its report. Missing reports, missing metrics, invalid adapter
+  evidence, or a threshold failure block promotion.
+
+Coverage percentage is a gate, not a claim of test quality. Acceptance mapping,
+red/green evidence, and independent verification remain mandatory.
 
 The finalized trace is canonical JSON with secrets and PII redacted and a
 SHA-256 integrity record under `.saturation/runs/`. Persistence or hash
@@ -123,8 +142,8 @@ warnings and inspect the prompt gates, module manifest, trust boundary, and
 output contract. A semantic prompt defect is a `G-PROMPT-*` gap and requires a
 new immutable prompt/handoff, not an edit to the old prompt.
 After each repair, a fresh, read-only verifier checks every gap, each
-acceptance criterion, the `prompt_contract` criterion, and (for schema v4)
-the `tdd_workflow` criterion. It emits
+acceptance criterion, the `prompt_contract` criterion, and (for schemas v4/v5)
+the `tdd_workflow` criterion. Schema v5 also checks `coverage_workflow`. It emits
 `result: "pass|fail"`, `independent: true`,
 `rechecks`, `tool_call_ref`, and the minimum dimensions of `completeness`,
 `clarity`, `consistency`, and `testability`. `trace_contract.verifier.dimensions`
@@ -134,7 +153,7 @@ must cover exactly every declared dimension. Also include the trace dimensions
 (`context_freeze`, `tool_order`, `session_freshness`, `write_scope`,
 `handoff_payload`, `readonly_review`, `evidence`, `repair_reverify`,
 `completion_gates`, `escalation`, `prompt_contract`), plus `tdd_workflow` for
-schema v4. Each dimension has `id`, `applicable`,
+schemas v4/v5 and `coverage_workflow` for schema v5. Each dimension has `id`, `applicable`,
 `result: "pass|fail|not_applicable"`, a non-empty claim, and non-empty evidence
 linked to an observable source; a missing, unsupported, or failed dimension
 prevents completion. A declared optional dimension that is not applicable uses

@@ -11,6 +11,7 @@ sys.path.insert(0, str(EVALS_DIR))
 import grader  # noqa: E402
 import prompt_contract  # noqa: E402
 import tdd_contract  # noqa: E402
+import coverage_contract  # noqa: E402
 import token_metrics  # noqa: E402
 
 
@@ -73,6 +74,153 @@ class GraderTests(unittest.TestCase):
         trace = copy.deepcopy(self.complete_v4)
         mutation(trace)
         return grader.grade_trace(trace, "v4-mutation")
+
+    def coverage_trace(self):
+        trace = copy.deepcopy(self.complete_v4)
+        report_path = ".agents/skills/saturation/evals/coverage-report.json"
+        source_path = ".agents/skills/saturation/evals/grader.py"
+
+        trace["schema_version"] = 5
+        trace["trace_schema_version"] = 5
+        trace["score_max"] = 130
+        trace["trace_contract"]["version"] = 5
+        trace["trace_contract"]["coverage"] = coverage_contract.expected_declaration()
+        trace["trace_contract"]["verifier"]["criteria"].append("coverage_workflow")
+
+        for item in trace["tool_calls"] + trace["events"]:
+            if item.get("event_id", item.get("call_id")) == "C-TDD-REG":
+                item["writes"] = [report_path]
+                item["mode"] = "coverage"
+            elif item.get("event_id", item.get("call_id")) == "E-TDD-REG":
+                item["writes"] = [report_path]
+            elif item.get("event_id", item.get("call_id")) == "C-TDD-VER":
+                item["reads"] = list(item["reads"]) + [report_path]
+            elif item.get("event_id", item.get("call_id")) == "E-TDD-VER":
+                item["reads"] = list(item["reads"]) + [report_path]
+
+        trace["evidence"].extend(
+            [
+                {
+                    "evidence_id": "EV-COV-TARGET",
+                    "source_id": "C-TDD-REG",
+                    "kind": "test",
+                    "claim": "Instrumented target regression reports passing line and branch coverage.",
+                    "paths": [source_path, report_path],
+                },
+                {
+                    "evidence_id": "EV-COV-VERIFIER",
+                    "source_id": "C-TDD-VER",
+                    "kind": "verification",
+                    "claim": "An independent verifier confirms the instrumented coverage report.",
+                    "paths": [source_path, report_path],
+                },
+                {
+                    "evidence_id": "EV-crit-coverage",
+                    "source_id": "E-009",
+                    "kind": "verification",
+                    "criterion_id": "coverage_workflow",
+                    "claim": "Coverage workflow passed independent verification.",
+                    "paths": [source_path, report_path],
+                },
+            ]
+        )
+        trace["coverage"] = {
+            "policy_version": "coverage-v1",
+            "required_for": ["implementation", "repair"],
+            "metrics": ["line", "branch"],
+            "thresholds": {"line": 80, "branch": 80},
+            "adapter": {
+                "id": "python.coverage",
+                "language": "python",
+                "tool": "coverage.py",
+                "version": "7.6.1",
+            },
+            "source_paths": [source_path],
+            "command": copy.deepcopy(trace["tdd"]["commands"]["regression"]),
+            "report": {
+                "path": report_path,
+                "format": "json",
+                "immutable_after_run": True,
+            },
+            "target_run": {
+                "run_id": "RUN-REGRESSION",
+                "source_id": "C-TDD-REG",
+                "status": "pass",
+                "metrics": {"line": 92, "branch": 88},
+                "evidence": ["EV-COV-TARGET"],
+            },
+            "verifier_run": {
+                "run_id": "RUN-VERIFIER",
+                "source_id": "C-TDD-VER",
+                "status": "pass",
+                "metrics": {"line": 91, "branch": 87},
+                "evidence": ["EV-COV-VERIFIER"],
+            },
+        }
+        verify_event = next(event for event in trace["events"] if event["event_id"] == "E-009")
+        verify_event["payload"]["verifier"]["criteria"]["coverage_workflow"] = {
+            "result": "pass",
+            "claim": "criterion checked",
+            "evidence": ["EV-crit-coverage"],
+        }
+        trace["tdd"]["persisted_trace"]["sha256"] = tdd_contract._trace_hash(trace)
+        return trace
+
+    def coverage_mutate(self, mutation):
+        trace = self.coverage_trace()
+        mutation(trace)
+        return grader.grade_trace(trace, "v5-mutation")
+
+    def assert_coverage_rejected(self, mutation):
+        result = self.coverage_mutate(mutation)
+        self.assertEqual(result["decision"], "REJECT")
+        self.assertIn("coverage_workflow", result["failed_criteria"])
+        return result
+
+    def test_coverage_workflow(self):
+        result = grader.grade_trace(self.coverage_trace(), "v5-complete")
+        self.assertEqual(
+            (result["decision"], result["score"], result["max_score"], result["grade"]),
+            ("ACCEPT", 130, 130, "A"),
+        )
+        self.assertEqual(result["metrics"]["coverage"]["status"], "required")
+        self.assertEqual(result["metrics"]["coverage"]["line"], 92)
+        self.assertEqual(result["metrics"]["coverage"]["branch"], 88)
+
+    def test_coverage_requires_line_and_branch_thresholds(self):
+        self.assert_coverage_rejected(
+            lambda trace: trace["coverage"]["thresholds"].pop("branch")
+        )
+
+    def test_coverage_blocks_below_threshold_metrics(self):
+        self.assert_coverage_rejected(
+            lambda trace: trace["coverage"]["target_run"]["metrics"].update(branch=79)
+        )
+
+    def test_coverage_requires_persisted_report(self):
+        self.assert_coverage_rejected(
+            lambda trace: trace["coverage"]["report"].update(immutable_after_run=False)
+        )
+
+    def test_coverage_requires_instrumented_report_write(self):
+        def mutation(trace):
+            call = self.call(trace, "C-TDD-REG")
+            call["writes"] = []
+
+        self.assert_coverage_rejected(mutation)
+
+    def test_coverage_requires_independent_verifier_evidence(self):
+        def mutation(trace):
+            trace["coverage"]["verifier_run"]["evidence"] = []
+
+        self.assert_coverage_rejected(mutation)
+
+    def test_v5_requires_coverage_block(self):
+        trace = self.coverage_trace()
+        trace.pop("coverage")
+        result = grader.grade_trace(trace, "v5-missing-coverage")
+        self.assertEqual(result["decision"], "REJECT")
+        self.assertIn("coverage_workflow", result["failed_criteria"])
 
     def assert_tdd_rejected(self, mutation):
         result = self.tdd_mutate(mutation)
@@ -175,7 +323,7 @@ class GraderTests(unittest.TestCase):
             criterion["id"]: criterion["checks"]
             for criterion in rubric["criteria"]
         }
-        for trace in (self.complete, self.complete_v4):
+        for trace in (self.complete, self.complete_v4, self.coverage_trace()):
             result = grader.grade_trace(copy.deepcopy(trace), "rubric-check")
             actual_checks = {
                 criterion["id"]: [check["id"] for check in criterion["checks"]]

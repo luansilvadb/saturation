@@ -15,9 +15,10 @@ import token_metrics
 
 
 SCHEMA_VERSION = 3
-CURRENT_SCHEMA_VERSION = 4
+TDD_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 LATEST_SCHEMA_VERSION = CURRENT_SCHEMA_VERSION
-SUPPORTED_SCHEMA_VERSIONS = {SCHEMA_VERSION, CURRENT_SCHEMA_VERSION}
+SUPPORTED_SCHEMA_VERSIONS = {SCHEMA_VERSION, TDD_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION}
 EXPECTED_WRITE_ROOT = ".agents/skills/saturation/evals"
 CONTEXT_PATH = ".saturation/context.md"
 EXPECTED_READ_ROOTS = (
@@ -155,13 +156,16 @@ CRITERIA = (
     ("prompt_contract", "prompt composition and trace contract"),
 )
 TDD_CRITERION = ("tdd_workflow", "test-first red/green workflow")
+COVERAGE_CRITERION = ("coverage_workflow", "instrumented line and branch coverage")
 MAX_SCORE = len(CRITERIA) * 10
 QUALITY_COMPARISON_STATUS = "deferred"
 QUALITY_COMPARISON_REASON = "future_versioned_outcome_comparison_required"
 
 
 def _criteria_for_trace(trace: Any) -> Tuple[Tuple[str, str], ...]:
-    if isinstance(trace, dict) and trace.get("schema_version") == LATEST_SCHEMA_VERSION:
+    if isinstance(trace, dict) and trace.get("schema_version") == CURRENT_SCHEMA_VERSION:
+        return CRITERIA + (TDD_CRITERION, COVERAGE_CRITERION)
+    if isinstance(trace, dict) and trace.get("schema_version") == TDD_SCHEMA_VERSION:
         return CRITERIA + (TDD_CRITERION,)
     return CRITERIA
 
@@ -211,7 +215,7 @@ def _strict_contract(trace: Dict[str, Any]) -> bool:
 
 
 def legacy_projection(trace: Dict[str, Any]) -> Dict[str, Any]:
-    """Project a v4 TDD trace onto the immutable v3 workflow contract."""
+    """Project a v4/v5 TDD trace onto the immutable v3 workflow contract."""
 
     projection = copy.deepcopy(trace)
     # Filtering below mutates nested payloads; never mutate the caller's trace.
@@ -248,7 +252,7 @@ def legacy_projection(trace: Dict[str, Any]) -> Dict[str, Any]:
         for record in _list(trace.get("evidence"))
         if isinstance(record, dict)
         and record.get("source_id") in source_ids
-        and record.get("criterion_id") != TDD_CRITERION[0]
+        and record.get("criterion_id") not in {TDD_CRITERION[0], COVERAGE_CRITERION[0]}
     ]
     used_assignment_ids = {
         item.get("assignment_id")
@@ -277,6 +281,7 @@ def legacy_projection(trace: Dict[str, Any]) -> Dict[str, Any]:
             verifier = _mapping(_payload(event).get("verifier"))
             criteria = _mapping(verifier.get("criteria"))
             criteria.pop(TDD_CRITERION[0], None)
+            criteria.pop(COVERAGE_CRITERION[0], None)
             if verifier:
                 verifier["criteria"] = criteria
             continue
@@ -288,6 +293,7 @@ def legacy_projection(trace: Dict[str, Any]) -> Dict[str, Any]:
         verifier = _mapping(_payload(event).get("verifier"))
         criteria = _mapping(verifier.get("criteria"))
         criteria.pop(TDD_CRITERION[0], None)
+        criteria.pop(COVERAGE_CRITERION[0], None)
         if verifier:
             verifier["criteria"] = criteria
     prompt_handoffs = {
@@ -305,6 +311,7 @@ def legacy_projection(trace: Dict[str, Any]) -> Dict[str, Any]:
     contract = copy.deepcopy(_mapping(trace.get("trace_contract")))
     contract["version"] = SCHEMA_VERSION
     contract.pop("tdd", None)
+    contract.pop("coverage", None)
     verifier = _mapping(contract.get("verifier"))
     verifier["criteria"] = [criterion_id for criterion_id, _ in CRITERIA]
     contract["verifier"] = verifier
@@ -318,6 +325,7 @@ def legacy_projection(trace: Dict[str, Any]) -> Dict[str, Any]:
     projection["trace_contract"] = contract
     projection["allowed_write_roots"] = [EXPECTED_WRITE_ROOT]
     projection.pop("tdd", None)
+    projection.pop("coverage", None)
     return projection
 
 
@@ -537,12 +545,16 @@ def validate_trace(trace: Any) -> List[str]:
     if not isinstance(trace, dict):
         return ["root must be an object"]
     schema_version = trace.get("schema_version")
-    if schema_version == LATEST_SCHEMA_VERSION:
+    if schema_version == CURRENT_SCHEMA_VERSION:
+        from coverage_contract import validate_v5_trace
+
+        return validate_v5_trace(trace)
+    if schema_version == TDD_SCHEMA_VERSION:
         from tdd_contract import validate_v4_trace
 
         return validate_v4_trace(trace)
     if not isinstance(schema_version, int) or isinstance(schema_version, bool) or schema_version not in SUPPORTED_SCHEMA_VERSIONS:
-        errors.append("schema_version must be 3 or 4")
+        errors.append("schema_version must be 3, 4, or 5")
     elif schema_version == SCHEMA_VERSION or "trace_contract" in trace:
         errors.extend(_contract_declaration_errors(trace))
     for key in ("trace_id", "objective"):
@@ -1871,13 +1883,13 @@ def _prompt_metrics(trace: Any) -> Dict[str, Any]:
         if isinstance(event, dict) and event.get("kind") == "repair"
     )
     average = _metric_number(sum(pcp_values) / len(pcp_values)) if pcp_values else None
-    if trace.get("schema_version") == LATEST_SCHEMA_VERSION:
+    if trace.get("schema_version") in {TDD_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION}:
         from tdd_contract import metrics as tdd_metrics
 
         tdd = tdd_metrics(trace)
     else:
         tdd = {"status": "not_applicable"}
-    return {
+    result = {
         "prompt_count": len(prompts),
         "attempt_count": len(attempts),
         "repair_count": repair_count,
@@ -1897,6 +1909,11 @@ def _prompt_metrics(trace: Any) -> Dict[str, Any]:
         "gate_failures": dict(sorted(gate_failures.items())),
         "chain_aggregates": dict(sorted(chain_aggregates.items())),
     }
+    if trace.get("schema_version") == CURRENT_SCHEMA_VERSION:
+        from coverage_contract import metrics as coverage_metrics
+
+        result["coverage"] = coverage_metrics(trace)
+    return result
 
 
 def _aggregate_token_metrics(results: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
@@ -1994,6 +2011,13 @@ def _aggregate_prompt_metrics(results: Sequence[Dict[str, Any]]) -> Dict[str, An
         "retries": 0,
     }
     tdd_status_counts: Dict[str, int] = {}
+    coverage_totals = {
+        "reports": 0,
+        "required": 0,
+        "exempt": 0,
+        "invalid": 0,
+    }
+    coverage_status_counts: Dict[str, int] = {}
     for result in results:
         metrics = _mapping(result.get("metrics"))
         prompt_count += int(metrics.get("prompt_count", 0))
@@ -2028,7 +2052,18 @@ def _aggregate_prompt_metrics(results: Sequence[Dict[str, Any]]) -> Dict[str, An
             value = tdd.get(key)
             if isinstance(value, int):
                 tdd_totals[key] += value
-    return {
+        coverage = metrics.get("coverage")
+        if not isinstance(coverage, dict):
+            continue
+        coverage_status = coverage.get("status", "not_applicable")
+        if isinstance(coverage_status, str):
+            coverage_status_counts[coverage_status] = coverage_status_counts.get(coverage_status, 0) + 1
+        reports = coverage.get("reports")
+        if isinstance(reports, int):
+            coverage_totals["reports"] += reports
+        if coverage_status in coverage_totals:
+            coverage_totals[coverage_status] += 1
+    result = {
         "trace_count": len(results),
         "prompt_count": prompt_count,
         "attempt_count": attempt_count,
@@ -2047,6 +2082,12 @@ def _aggregate_prompt_metrics(results: Sequence[Dict[str, Any]]) -> Dict[str, An
         "strategy_counts": dict(sorted(strategy_counts.items())),
         "gate_failures": dict(sorted(gate_failures.items())),
     }
+    if coverage_status_counts:
+        result["coverage"] = {
+            **coverage_totals,
+            "status_counts": dict(sorted(coverage_status_counts.items())),
+        }
+    return result
 
 
 def grade_trace(trace: Dict[str, Any], source: str = "") -> Dict[str, Any]:
@@ -2068,7 +2109,8 @@ def grade_trace(trace: Dict[str, Any], source: str = "") -> Dict[str, Any]:
             "failed_criteria": [item["id"] for item in criteria],
             "metrics": _prompt_metrics(trace),
         }
-    grading_trace = legacy_projection(trace) if trace.get("schema_version") == LATEST_SCHEMA_VERSION else trace
+    is_tdd_trace = trace.get("schema_version") in {TDD_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION}
+    grading_trace = legacy_projection(trace) if is_tdd_trace else trace
     criteria = [
         _grade_context(grading_trace),
         _grade_order(grading_trace),
@@ -2080,12 +2122,27 @@ def grade_trace(trace: Dict[str, Any], source: str = "") -> Dict[str, Any]:
         _grade_repair(grading_trace),
         _grade_completion(grading_trace),
         _grade_escalation(grading_trace),
-        _grade_prompt_contract(trace) if trace.get("schema_version") == LATEST_SCHEMA_VERSION else _grade_prompt_contract(grading_trace),
+        _grade_prompt_contract(trace) if is_tdd_trace else _grade_prompt_contract(grading_trace),
     ]
-    if trace.get("schema_version") == LATEST_SCHEMA_VERSION:
+    if is_tdd_trace:
         from tdd_contract import grade_tdd
 
-        criteria.append(grade_tdd(trace))
+        if trace.get("schema_version") == CURRENT_SCHEMA_VERSION:
+            from coverage_contract import expected_declaration
+
+            criteria.append(
+                grade_tdd(
+                    trace,
+                    contract_extensions={"coverage": expected_declaration()},
+                    extra_criteria=[COVERAGE_CRITERION[0]],
+                )
+            )
+        else:
+            criteria.append(grade_tdd(trace))
+    if trace.get("schema_version") == CURRENT_SCHEMA_VERSION:
+        from coverage_contract import grade_coverage
+
+        criteria.append(grade_coverage(trace))
     score = sum(item["earned_points"] for item in criteria)
     accepted = score == max_score and all(item["status"] == "pass" for item in criteria)
     grade = "A" if accepted else ("B" if score >= max_score * 0.9 else ("C" if score >= max_score * 0.75 else "D"))
@@ -2143,7 +2200,7 @@ DEFAULT_TRACES_DIR = Path(__file__).resolve().parent / "traces"
 DEFAULT_TDD_TRACES_DIR = Path(__file__).resolve().parent / "traces_v4"
 EXPECTED_DECISIONS = {"ACCEPT", "REJECT"}
 CRITERION_IDS = {criterion_id for criterion_id, _ in CRITERIA}
-CRITERION_IDS_WITH_TDD = CRITERION_IDS | {TDD_CRITERION[0]}
+CRITERION_IDS_WITH_TDD = CRITERION_IDS | {TDD_CRITERION[0], COVERAGE_CRITERION[0]}
 
 
 def discover_traces(directory: Optional[Path] = None) -> List[Path]:
@@ -2300,6 +2357,21 @@ def _format_report(payload: Dict[str, Any]) -> str:
                 ",".join(
                     "%s:%s" % (key, value)
                     for key, value in _mapping(tdd.get("status_counts")).items()
+                ),
+            )
+        )
+    coverage = _mapping(metrics.get("coverage"))
+    if coverage and coverage.get("status_counts"):
+        lines.append(
+            "COVERAGE: reports=%s required=%s invalid=%s exempt=%s statuses=%s"
+            % (
+                coverage.get("reports", 0),
+                coverage.get("required", 0),
+                coverage.get("invalid", 0),
+                coverage.get("exempt", 0),
+                ",".join(
+                    "%s:%s" % (key, value)
+                    for key, value in _mapping(coverage.get("status_counts")).items()
                 ),
             )
         )

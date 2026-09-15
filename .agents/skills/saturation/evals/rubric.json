@@ -1,22 +1,27 @@
 {
-  "schema_version": 4,
-  "trace_schema_version": 4,
-  "score_max": 120,
+  "schema_version": 5,
+  "trace_schema_version": 5,
+  "score_max": 130,
   "compatibility": {
     "schema_version": 3,
     "score_max": 110,
     "grade": "A"
   },
+  "tdd_compatibility": {
+    "schema_version": 4,
+    "score_max": 120,
+    "grade": "A"
+  },
   "acceptance": {
     "decision": "ACCEPT",
-    "score": 120,
+    "score": 130,
     "grade": "A"
   },
   "contracts": {
     "sequence": "Every event and tool call has a unique integer sequence in one merged lifecycle; array order, phase order, call-before-event links, and handoff-before-target links are strictly causal.",
     "causal_links": "Operational event and tool links are bidirectional and exactly match phase, actor, assignment, reads, and writes.",
     "handoff": "Every handoff has exact typed context, assignment (including normalized read_scope and write_scope), state, input, output, error, stop, evidence, and fresh_session fields; output status is complete, needs_repair, or blocked, and output targets, changed paths, outcome state, and unique target backrefs agree.",
-    "verifier": "The verifier has the four base dimensions plus exactly the trace-declared optional dimensions and all twelve v4 rubric criteria, each with distinct aligned verifier-sourced evidence.",
+    "verifier": "The verifier has the four base dimensions plus exactly the trace-declared optional dimensions and all thirteen v5 rubric criteria, each with distinct aligned verifier-sourced evidence.",
     "prompt": "Every dispatched prompt has the canonical nine sections, ordered module hashes, adaptive strategy metadata, phase output contract, PCP arithmetic, quality gates, sanitized immutable text, causal links, and review coverage; blocked attempts are bounded and linked."
   },
   "criteria": [
@@ -79,6 +84,11 @@
       "id": "tdd_workflow",
       "points": 10,
       "checks": ["declaration", "classification", "baseline", "commands", "artifacts", "test_ids", "acceptance_map", "exemption", "runs", "retry_limit", "cycle", "red_green", "barrier", "verifier", "prompt", "persistence", "redaction", "verifier_criterion"]
+    },
+    {
+      "id": "coverage_workflow",
+      "points": 10,
+      "checks": ["declaration", "classification", "policy", "thresholds", "command", "source_paths", "report", "target_run", "verifier_run", "verifier_criterion"]
     }
   ],
   "regression_matrix": [
