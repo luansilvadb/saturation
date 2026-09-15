@@ -19,6 +19,8 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 
 SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
+SUPPORTED_SCHEMA_VERSIONS = (SCHEMA_VERSION, CURRENT_SCHEMA_VERSION)
 PROMPT_POLICY_VERSION = "pcp-v1"
 PROMPT_SECTIONS = (
     "Role",
@@ -34,6 +36,18 @@ PROMPT_SECTIONS = (
 PROMPT_PHASES = (
     "freeze_context",
     "inspect",
+    "implement",
+    "review",
+    "final_review",
+    "repair",
+    "verify",
+    "promote",
+    "completion_gate",
+)
+PROMPT_PHASES_V4 = (
+    "freeze_context",
+    "inspect",
+    "test_first",
     "implement",
     "review",
     "final_review",
@@ -135,6 +149,26 @@ PROMPT_OUTPUT_CONTRACTS = {
         "tool_call_ref",
     ),
 }
+PROMPT_OUTPUT_CONTRACTS_V4 = {
+    "context_freeze.v3": PROMPT_OUTPUT_CONTRACTS["context_freeze.v3"],
+    "inspection.v3": PROMPT_OUTPUT_CONTRACTS["inspection.v3"],
+    "handoff.v3": PROMPT_OUTPUT_CONTRACTS["handoff.v3"],
+    "test_first.v1": (
+        "tool_call_ref",
+        "handoff_ref",
+        "cycle_id",
+        "mode",
+        "test_artifact_paths",
+        "red_run",
+    ),
+    "implementation.v3": PROMPT_OUTPUT_CONTRACTS["implementation.v3"],
+    "review.v3": PROMPT_OUTPUT_CONTRACTS["review.v3"],
+    "repair.v3": PROMPT_OUTPUT_CONTRACTS["repair.v3"],
+    "verification.v3": PROMPT_OUTPUT_CONTRACTS["verification.v3"],
+    "final_review.v3": PROMPT_OUTPUT_CONTRACTS["final_review.v3"],
+    "promotion.v3": PROMPT_OUTPUT_CONTRACTS["promotion.v3"],
+    "completion_gate.v3": PROMPT_OUTPUT_CONTRACTS["completion_gate.v3"],
+}
 PROMPT_OUTPUT_IDS = tuple(PROMPT_OUTPUT_CONTRACTS)
 PROMPT_FIELDS = (
     "prompt_id",
@@ -221,6 +255,10 @@ PROMPT_PHASE_CONTRACTS = {
     "promote": "promotion.v3",
     "completion_gate": "completion_gate.v3",
 }
+PROMPT_PHASE_CONTRACTS_V4 = {
+    **PROMPT_PHASE_CONTRACTS,
+    "test_first": "test_first.v1",
+}
 EVENT_KIND_FOR_PHASE = {
     "freeze_context": "context_frozen",
     "inspect": "inspection",
@@ -231,6 +269,10 @@ EVENT_KIND_FOR_PHASE = {
     "verify": "verify",
     "promote": "promotion",
     "completion_gate": "completion_gate",
+}
+EVENT_KIND_FOR_PHASE_V4 = {
+    **EVENT_KIND_FOR_PHASE,
+    "test_first": "test_first",
 }
 TARGET_CALL_PHASE_FOR_PROMPT = {
     "final_review": "review",
@@ -251,6 +293,27 @@ KNOWN_MODULES = {
 }
 MODULE_ROOT = ".agents/skills/saturation/code_styleguides/"
 HEX_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _schema_version(trace: Mapping[str, Any]) -> int:
+    value = trace.get("schema_version")
+    return value if value in SUPPORTED_SCHEMA_VERSIONS else SCHEMA_VERSION
+
+
+def _prompt_contracts(version: int) -> Dict[str, Tuple[str, ...]]:
+    return PROMPT_OUTPUT_CONTRACTS_V4 if version == CURRENT_SCHEMA_VERSION else PROMPT_OUTPUT_CONTRACTS
+
+
+def _prompt_phases(version: int) -> Tuple[str, ...]:
+    return PROMPT_PHASES_V4 if version == CURRENT_SCHEMA_VERSION else PROMPT_PHASES
+
+
+def _phase_contracts(version: int) -> Dict[str, str]:
+    return PROMPT_PHASE_CONTRACTS_V4 if version == CURRENT_SCHEMA_VERSION else PROMPT_PHASE_CONTRACTS
+
+
+def _event_kinds_for_phase(version: int) -> Dict[str, str]:
+    return EVENT_KIND_FOR_PHASE_V4 if version == CURRENT_SCHEMA_VERSION else EVENT_KIND_FOR_PHASE
 
 _SECRET_PATTERNS = (
     ("private_key", re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----")),
@@ -433,17 +496,22 @@ def validate_rendered_prompt(text: Any) -> List[str]:
     return errors
 
 
-def _validate_output_contract_text(contract_id: Any, text: Any) -> List[str]:
+def _validate_output_contract_text(
+    contract_id: Any,
+    text: Any,
+    contracts: Optional[Mapping[str, Tuple[str, ...]]] = None,
+) -> List[str]:
     """Require the selected machine contract to be visible in the prompt."""
 
-    if not isinstance(contract_id, str) or contract_id not in PROMPT_OUTPUT_CONTRACTS:
+    contracts = contracts or PROMPT_OUTPUT_CONTRACTS
+    if not isinstance(contract_id, str) or contract_id not in contracts:
         return ["output_contract_id must name a declared output contract"]
     if not isinstance(text, str):
         return []
     errors: List[str] = []
     if contract_id not in text:
         errors.append("rendered_prompt must name its output_contract_id")
-    for field in PROMPT_OUTPUT_CONTRACTS[contract_id]:
+    for field in contracts[contract_id]:
         if not re.search(r"(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])" % re.escape(field), text):
             errors.append("rendered_prompt must name output field %s" % field)
     return errors
@@ -635,10 +703,14 @@ def _validate_gates(value: Any, *, allow_fail: bool = False) -> List[str]:
     return errors
 
 
-def validate_prompt_declaration(value: Any) -> List[str]:
+def validate_prompt_declaration(
+    value: Any,
+    schema_version: int = SCHEMA_VERSION,
+) -> List[str]:
     errors: List[str] = []
     if not _exact_fields(value, PROMPT_DECLARATION_FIELDS):
         return ["trace_contract.prompt has the wrong fields"]
+    contracts = _prompt_contracts(schema_version)
     if value.get("policy_version") != PROMPT_POLICY_VERSION:
         errors.append("trace_contract.prompt.policy_version must be pcp-v1")
     if value.get("sections") != list(PROMPT_SECTIONS):
@@ -670,7 +742,7 @@ def validate_prompt_declaration(value: Any) -> List[str]:
     output_contracts = value.get("output_contracts")
     expected_contracts = [
         {"id": contract_id, "required_fields": list(fields)}
-        for contract_id, fields in PROMPT_OUTPUT_CONTRACTS.items()
+        for contract_id, fields in contracts.items()
     ]
     if output_contracts != expected_contracts:
         errors.append("trace_contract.prompt.output_contracts are not canonical")
@@ -748,7 +820,12 @@ def _validate_prompt_record(
 ) -> List[str]:
     errors: List[str] = []
     if not _exact_fields(prompt, PROMPT_FIELDS):
-        return ["prompt record must contain the exact v3 prompt fields"]
+        return ["prompt record must contain the exact versioned prompt fields"]
+    version = _schema_version(trace)
+    contracts = _prompt_contracts(version)
+    phases = _prompt_phases(version)
+    phase_contracts = _phase_contracts(version)
+    event_kinds = _event_kinds_for_phase(version)
     prompt_id = prompt.get("prompt_id")
     if not _nonempty_string(prompt_id) or prompt_id in prompt_ids:
         errors.append("prompt IDs must be non-empty and unique")
@@ -774,9 +851,9 @@ def _validate_prompt_record(
     if not _nonempty_string(prompt.get("actor_id")):
         errors.append("prompt actor_id must be non-empty")
     phase = prompt.get("phase")
-    if phase not in PROMPT_PHASES:
+    if phase not in phases:
         errors.append("prompt phase is not supported")
-    if isinstance(phase, str) and phase in PROMPT_PHASE_CONTRACTS and prompt.get("output_contract_id") != PROMPT_PHASE_CONTRACTS[phase]:
+    if isinstance(phase, str) and phase in phase_contracts and prompt.get("output_contract_id") != phase_contracts[phase]:
         errors.append("prompt output_contract_id does not match its phase")
     if prompt.get("language") != "en":
         errors.append("prompt language must be en")
@@ -784,7 +861,7 @@ def _validate_prompt_record(
         errors.append("prompt sections must be canonical")
     errors.extend(validate_modules(prompt.get("modules")))
     errors.extend(validate_rendered_prompt(prompt.get("rendered_prompt")))
-    errors.extend(_validate_output_contract_text(prompt.get("output_contract_id"), prompt.get("rendered_prompt")))
+    errors.extend(_validate_output_contract_text(prompt.get("output_contract_id"), prompt.get("rendered_prompt"), contracts))
     rendered_prompt = prompt.get("rendered_prompt")
     if isinstance(rendered_prompt, str) and prompt.get("normalized_sha256") != prompt_sha256(rendered_prompt):
         errors.append("prompt normalized_sha256 does not match rendered_prompt")
@@ -813,7 +890,7 @@ def _validate_prompt_record(
     target_call = calls.get(call_id) if isinstance(call_id, str) else None
     if not isinstance(handoff, dict) or handoff.get("kind") != "handoff":
         errors.append("prompt handoff_event_id must resolve to a handoff")
-    expected_event_kind = EVENT_KIND_FOR_PHASE.get(phase) if isinstance(phase, str) else None
+    expected_event_kind = event_kinds.get(phase) if isinstance(phase, str) else None
     if not isinstance(target_event, dict) or target_event.get("kind") != expected_event_kind:
         errors.append("prompt target_event_id does not match its phase")
     if not isinstance(target_call, dict) or target_call.get("phase") != _expected_call_phase(phase):
@@ -852,7 +929,10 @@ def _validate_attempt(
 ) -> List[str]:
     errors: List[str] = []
     if not _exact_fields(attempt, ATTEMPT_FIELDS):
-        return ["prompt attempt must contain the exact v3 attempt fields"]
+        return ["prompt attempt must contain the exact versioned attempt fields"]
+    version = _schema_version(trace)
+    contracts = _prompt_contracts(version)
+    phase_contracts = _phase_contracts(version)
     attempt_id = attempt.get("attempt_id")
     if not _nonempty_string(attempt_id) or attempt_id in attempt_ids:
         errors.append("attempt IDs must be non-empty and unique")
@@ -871,7 +951,7 @@ def _validate_attempt(
         errors.append("attempt predecessor must share prompt_family_id")
     errors.extend(validate_modules(attempt.get("modules")))
     errors.extend(validate_rendered_prompt(attempt.get("rendered_prompt")))
-    errors.extend(_validate_output_contract_text(attempt.get("output_contract_id"), attempt.get("rendered_prompt")))
+    errors.extend(_validate_output_contract_text(attempt.get("output_contract_id"), attempt.get("rendered_prompt"), contracts))
     rendered_prompt = attempt.get("rendered_prompt")
     if isinstance(rendered_prompt, str) and attempt.get("normalized_sha256") != prompt_sha256(rendered_prompt):
         errors.append("attempt normalized_sha256 does not match rendered_prompt")
@@ -883,7 +963,7 @@ def _validate_attempt(
     handoff = _event_map(trace).get(handoff_id) if isinstance(handoff_id, str) else None
     phase = _mapping(_mapping(handoff).get("payload")).get("state")
     phase = _mapping(phase).get("phase")
-    if isinstance(phase, str) and phase in PROMPT_PHASE_CONTRACTS and attempt.get("output_contract_id") != PROMPT_PHASE_CONTRACTS[phase]:
+    if isinstance(phase, str) and phase in phase_contracts and attempt.get("output_contract_id") != phase_contracts[phase]:
         errors.append("attempt output_contract_id does not match its phase")
     errors.extend(_validate_strategy(
         attempt.get("strategy"),
@@ -943,11 +1023,12 @@ def _validate_prompt_review(trace: Mapping[str, Any], prompt_ids: set, attempt_i
 
 
 def validate_prompt_catalog(trace: Mapping[str, Any]) -> List[str]:
-    """Validate the v3 prompt declaration and all prompt-related records."""
+    """Validate the versioned prompt declaration and prompt-related records."""
 
     errors: List[str] = []
     contract = _mapping(trace.get("trace_contract"))
-    errors.extend(validate_prompt_declaration(contract.get("prompt")))
+    version = _schema_version(trace)
+    errors.extend(validate_prompt_declaration(contract.get("prompt"), version))
     prompts = trace.get("prompts")
     attempts = trace.get("prompt_attempts")
     if not isinstance(prompts, list):
@@ -1098,15 +1179,15 @@ def _load_trace(path: Path) -> Dict[str, Any]:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Validate saturation prompt contract records.")
-    parser.add_argument("--trace", type=Path, required=True, help="v3 trace JSON file")
+    parser.add_argument("--trace", type=Path, required=True, help="versioned trace JSON file")
     parser.add_argument("--root", type=Path, help="optional repository root for module hash checks")
     parser.add_argument("--json", action="store_true", dest="as_json", help="emit JSON errors")
     args = parser.parse_args(argv)
     try:
         trace = _load_trace(args.trace)
         errors = []
-        if trace.get("schema_version") != SCHEMA_VERSION:
-            errors.append("schema_version must be 3")
+        if trace.get("schema_version") not in SUPPORTED_SCHEMA_VERSIONS:
+            errors.append("schema_version must be 3 or 4")
         errors.extend(validate_prompt_catalog(trace))
         if args.root is not None:
             errors.extend(validate_module_root(trace, args.root))

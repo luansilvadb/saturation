@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import math
 import posixpath
@@ -14,8 +15,9 @@ import token_metrics
 
 
 SCHEMA_VERSION = 3
-CURRENT_SCHEMA_VERSION = 3
-SUPPORTED_SCHEMA_VERSIONS = {CURRENT_SCHEMA_VERSION}
+CURRENT_SCHEMA_VERSION = 4
+LATEST_SCHEMA_VERSION = CURRENT_SCHEMA_VERSION
+SUPPORTED_SCHEMA_VERSIONS = {SCHEMA_VERSION, CURRENT_SCHEMA_VERSION}
 EXPECTED_WRITE_ROOT = ".agents/skills/saturation/evals"
 CONTEXT_PATH = ".saturation/context.md"
 EXPECTED_READ_ROOTS = (
@@ -152,9 +154,20 @@ CRITERIA = (
     ("escalation", "conflict and blocker escalation"),
     ("prompt_contract", "prompt composition and trace contract"),
 )
+TDD_CRITERION = ("tdd_workflow", "test-first red/green workflow")
 MAX_SCORE = len(CRITERIA) * 10
 QUALITY_COMPARISON_STATUS = "deferred"
 QUALITY_COMPARISON_REASON = "future_versioned_outcome_comparison_required"
+
+
+def _criteria_for_trace(trace: Any) -> Tuple[Tuple[str, str], ...]:
+    if isinstance(trace, dict) and trace.get("schema_version") == LATEST_SCHEMA_VERSION:
+        return CRITERIA + (TDD_CRITERION,)
+    return CRITERIA
+
+
+def _max_score_for_trace(trace: Any) -> int:
+    return len(_criteria_for_trace(trace)) * 10
 
 
 def load_trace(path: Path) -> Dict[str, Any]:
@@ -194,7 +207,118 @@ def _id_set(value: Any) -> set:
 
 
 def _strict_contract(trace: Dict[str, Any]) -> bool:
-    return trace.get("schema_version") == CURRENT_SCHEMA_VERSION
+    return trace.get("schema_version") == SCHEMA_VERSION
+
+
+def legacy_projection(trace: Dict[str, Any]) -> Dict[str, Any]:
+    """Project a v4 TDD trace onto the immutable v3 workflow contract."""
+
+    projection = copy.deepcopy(trace)
+    # Filtering below mutates nested payloads; never mutate the caller's trace.
+    trace = projection
+    projection["schema_version"] = SCHEMA_VERSION
+    projection["trace_schema_version"] = SCHEMA_VERSION
+    projection["score_max"] = len(CRITERIA) * 10
+
+    legacy_events = []
+    for event in _list(trace.get("events")):
+        if not isinstance(event, dict):
+            continue
+        if event.get("kind") == "handoff":
+            phase = _mapping(_payload(event).get("state")).get("phase")
+            if phase not in HANDOFF_PHASES:
+                continue
+        elif event.get("kind") not in EVENT_KINDS:
+            continue
+        legacy_events.append(event)
+    legacy_calls = [
+        call
+        for call in _list(trace.get("tool_calls"))
+        if isinstance(call, dict) and call.get("phase") in TOOL_PHASES
+    ]
+    source_ids = {
+        item.get("event_id", item.get("call_id"))
+        for item in legacy_events + legacy_calls
+        if isinstance(item, dict)
+    }
+    projection["events"] = legacy_events
+    projection["tool_calls"] = legacy_calls
+    projection["evidence"] = [
+        record
+        for record in _list(trace.get("evidence"))
+        if isinstance(record, dict)
+        and record.get("source_id") in source_ids
+        and record.get("criterion_id") != TDD_CRITERION[0]
+    ]
+    used_assignment_ids = {
+        item.get("assignment_id")
+        for item in legacy_events + legacy_calls
+        if isinstance(item, dict) and isinstance(item.get("assignment_id"), str)
+    }
+    projection["assignments"] = [
+        assignment
+        for assignment in _list(trace.get("assignments"))
+        if isinstance(assignment, dict)
+        and assignment.get("assignment_id") in used_assignment_ids
+    ]
+    projection["prompts"] = [
+        prompt
+        for prompt in _list(trace.get("prompts"))
+        if isinstance(prompt, dict) and prompt.get("phase") != "test_first"
+    ]
+    legacy_prompt_ids = {
+        prompt.get("prompt_id")
+        for prompt in projection["prompts"]
+        if isinstance(prompt, dict)
+    }
+    for event in legacy_events:
+        prompt_review = _mapping(_payload(event).get("prompt_review"))
+        if not prompt_review:
+            verifier = _mapping(_payload(event).get("verifier"))
+            criteria = _mapping(verifier.get("criteria"))
+            criteria.pop(TDD_CRITERION[0], None)
+            if verifier:
+                verifier["criteria"] = criteria
+            continue
+        prompt_review["prompt_ids"] = [
+            prompt_id
+            for prompt_id in _list(prompt_review.get("prompt_ids"))
+            if prompt_id in legacy_prompt_ids
+        ]
+        verifier = _mapping(_payload(event).get("verifier"))
+        criteria = _mapping(verifier.get("criteria"))
+        criteria.pop(TDD_CRITERION[0], None)
+        if verifier:
+            verifier["criteria"] = criteria
+    prompt_handoffs = {
+        event.get("event_id")
+        for event in legacy_events
+        if isinstance(event, dict) and event.get("kind") == "handoff"
+    }
+    projection["prompt_attempts"] = [
+        attempt
+        for attempt in _list(trace.get("prompt_attempts"))
+        if isinstance(attempt, dict)
+        and attempt.get("handoff_event_id") in prompt_handoffs
+    ]
+
+    contract = copy.deepcopy(_mapping(trace.get("trace_contract")))
+    contract["version"] = SCHEMA_VERSION
+    contract.pop("tdd", None)
+    verifier = _mapping(contract.get("verifier"))
+    verifier["criteria"] = [criterion_id for criterion_id, _ in CRITERIA]
+    contract["verifier"] = verifier
+    prompt = _mapping(contract.get("prompt"))
+    prompt["output_contracts"] = [
+        item
+        for item in _list(prompt.get("output_contracts"))
+        if isinstance(item, dict) and item.get("id") != "test_first.v1"
+    ]
+    contract["prompt"] = prompt
+    projection["trace_contract"] = contract
+    projection["allowed_write_roots"] = [EXPECTED_WRITE_ROOT]
+    projection.pop("tdd", None)
+    return projection
 
 
 def _contract(trace: Dict[str, Any]) -> Dict[str, Any]:
@@ -360,7 +484,7 @@ def _contract_declaration_errors(trace: Dict[str, Any]) -> List[str]:
     errors: List[str] = []
     if set(declaration) != {"version", "causal_links", "handoff", "verifier", "prompt"}:
         errors.append("trace_contract must contain the fixed v3 declarations")
-    if declaration.get("version") != CURRENT_SCHEMA_VERSION:
+    if declaration.get("version") != SCHEMA_VERSION:
         errors.append("trace_contract.version must be 3")
     if declaration.get("causal_links") != "bidirectional":
         errors.append("trace_contract.causal_links must be bidirectional")
@@ -413,9 +537,13 @@ def validate_trace(trace: Any) -> List[str]:
     if not isinstance(trace, dict):
         return ["root must be an object"]
     schema_version = trace.get("schema_version")
+    if schema_version == LATEST_SCHEMA_VERSION:
+        from tdd_contract import validate_v4_trace
+
+        return validate_v4_trace(trace)
     if not isinstance(schema_version, int) or isinstance(schema_version, bool) or schema_version not in SUPPORTED_SCHEMA_VERSIONS:
-        errors.append("schema_version must be 3")
-    elif schema_version == CURRENT_SCHEMA_VERSION or "trace_contract" in trace:
+        errors.append("schema_version must be 3 or 4")
+    elif schema_version == SCHEMA_VERSION or "trace_contract" in trace:
         errors.extend(_contract_declaration_errors(trace))
     for key in ("trace_id", "objective"):
         if not _nonempty_string(trace.get(key)):
@@ -1640,7 +1768,7 @@ def _grade_prompt_contract(trace: Dict[str, Any]) -> Dict[str, Any]:
         return not _prompt_error_subset(errors, *terms)
 
     checks = [
-        ("declaration", clean(("prompt declaration",)), "prompt policy declaration must be v3 and canonical"),
+        ("declaration", clean(("prompt declaration",)), "prompt policy declaration must be canonical for the active schema"),
         ("catalog", clean(("prompt record", "prompt attempt", "prompt IDs", "attempt IDs", "prompts must", "prompt_attempts must")), "prompt catalogs and exact record fields must be present"),
         ("coverage", clean(("no dispatched prompt record", "each handoff", "handoff_event_id")), "each prompted handoff must have one prompt"),
         ("causal_links", clean(("target event", "target call", "prompt actor", "target tool call", "prompt_id")), "prompt, event, call, actor, and handoff links must agree"),
@@ -1743,11 +1871,18 @@ def _prompt_metrics(trace: Any) -> Dict[str, Any]:
         if isinstance(event, dict) and event.get("kind") == "repair"
     )
     average = _metric_number(sum(pcp_values) / len(pcp_values)) if pcp_values else None
+    if trace.get("schema_version") == LATEST_SCHEMA_VERSION:
+        from tdd_contract import metrics as tdd_metrics
+
+        tdd = tdd_metrics(trace)
+    else:
+        tdd = {"status": "not_applicable"}
     return {
         "prompt_count": len(prompts),
         "attempt_count": len(attempts),
         "repair_count": repair_count,
         "quality_comparison": _quality_comparison(),
+        "tdd": tdd,
         "tokens": token_metrics.build_metrics(trace),
         "pcp": {
             "total": _metric_number(sum(pcp_values)) if pcp_values else 0,
@@ -1848,6 +1983,17 @@ def _aggregate_prompt_metrics(results: Sequence[Dict[str, Any]]) -> Dict[str, An
     exceptions = 0
     strategy_counts: Dict[str, int] = {}
     gate_failures: Dict[str, int] = {}
+    tdd_totals = {
+        "cycles": 0,
+        "initial_cycles": 0,
+        "repair_cycles": 0,
+        "valid_red": 0,
+        "valid_green": 0,
+        "waivers": 0,
+        "blocked": 0,
+        "retries": 0,
+    }
+    tdd_status_counts: Dict[str, int] = {}
     for result in results:
         metrics = _mapping(result.get("metrics"))
         prompt_count += int(metrics.get("prompt_count", 0))
@@ -1874,6 +2020,14 @@ def _aggregate_prompt_metrics(results: Sequence[Dict[str, Any]]) -> Dict[str, An
         for key, value in _mapping(metrics.get("gate_failures")).items():
             if isinstance(value, int):
                 gate_failures[key] = gate_failures.get(key, 0) + value
+        tdd = _mapping(metrics.get("tdd"))
+        status = tdd.get("status", "not_applicable")
+        if isinstance(status, str):
+            tdd_status_counts[status] = tdd_status_counts.get(status, 0) + 1
+        for key in tdd_totals:
+            value = tdd.get(key)
+            if isinstance(value, int):
+                tdd_totals[key] += value
     return {
         "trace_count": len(results),
         "prompt_count": prompt_count,
@@ -1885,6 +2039,10 @@ def _aggregate_prompt_metrics(results: Sequence[Dict[str, Any]]) -> Dict[str, An
         "pcp_warnings": warnings,
         "pcp_exceptions": exceptions,
         "quality_comparison": _quality_comparison(),
+        "tdd": {
+            **tdd_totals,
+            "status_counts": dict(sorted(tdd_status_counts.items())),
+        },
         "tokens": _aggregate_token_metrics(results),
         "strategy_counts": dict(sorted(strategy_counts.items())),
         "gate_failures": dict(sorted(gate_failures.items())),
@@ -1893,44 +2051,51 @@ def _aggregate_prompt_metrics(results: Sequence[Dict[str, Any]]) -> Dict[str, An
 
 def grade_trace(trace: Dict[str, Any], source: str = "") -> Dict[str, Any]:
     errors = validate_trace(trace)
+    criteria_definition = _criteria_for_trace(trace)
+    max_score = len(criteria_definition) * 10
     if errors:
-        criteria = [_failed_result(cid, label, "schema: " + ", ".join(errors)) for cid, label in CRITERIA]
+        criteria = [_failed_result(cid, label, "schema: " + ", ".join(errors)) for cid, label in criteria_definition]
         return {
             "trace_id": trace.get("trace_id", source) if isinstance(trace, dict) else source,
             "source": source,
             "schema_valid": False,
             "schema_errors": errors,
             "score": 0,
-            "max_score": MAX_SCORE,
+            "max_score": max_score,
             "grade": "D",
             "decision": "REJECT",
             "criteria": criteria,
             "failed_criteria": [item["id"] for item in criteria],
             "metrics": _prompt_metrics(trace),
         }
+    grading_trace = legacy_projection(trace) if trace.get("schema_version") == LATEST_SCHEMA_VERSION else trace
     criteria = [
-        _grade_context(trace),
-        _grade_order(trace),
-        _grade_sessions(trace),
-        _grade_scope(trace),
-        _grade_handoff(trace),
-        _grade_review(trace),
-        _grade_evidence(trace),
-        _grade_repair(trace),
-        _grade_completion(trace),
-        _grade_escalation(trace),
-        _grade_prompt_contract(trace),
+        _grade_context(grading_trace),
+        _grade_order(grading_trace),
+        _grade_sessions(grading_trace),
+        _grade_scope(grading_trace),
+        _grade_handoff(grading_trace),
+        _grade_review(grading_trace),
+        _grade_evidence(grading_trace),
+        _grade_repair(grading_trace),
+        _grade_completion(grading_trace),
+        _grade_escalation(grading_trace),
+        _grade_prompt_contract(trace) if trace.get("schema_version") == LATEST_SCHEMA_VERSION else _grade_prompt_contract(grading_trace),
     ]
+    if trace.get("schema_version") == LATEST_SCHEMA_VERSION:
+        from tdd_contract import grade_tdd
+
+        criteria.append(grade_tdd(trace))
     score = sum(item["earned_points"] for item in criteria)
-    accepted = score == MAX_SCORE and all(item["status"] == "pass" for item in criteria)
-    grade = "A" if accepted else ("B" if score >= MAX_SCORE * 0.9 else ("C" if score >= MAX_SCORE * 0.75 else "D"))
+    accepted = score == max_score and all(item["status"] == "pass" for item in criteria)
+    grade = "A" if accepted else ("B" if score >= max_score * 0.9 else ("C" if score >= max_score * 0.75 else "D"))
     return {
         "trace_id": trace.get("trace_id", source),
         "source": source,
         "schema_valid": True,
         "schema_errors": [],
         "score": score,
-        "max_score": MAX_SCORE,
+        "max_score": max_score,
         "grade": grade,
         "decision": "ACCEPT" if accepted else "REJECT",
         "criteria": criteria,
@@ -1975,8 +2140,10 @@ def format_result(result: Dict[str, Any], expected: str = "") -> str:
 
 
 DEFAULT_TRACES_DIR = Path(__file__).resolve().parent / "traces"
+DEFAULT_TDD_TRACES_DIR = Path(__file__).resolve().parent / "traces_v4"
 EXPECTED_DECISIONS = {"ACCEPT", "REJECT"}
 CRITERION_IDS = {criterion_id for criterion_id, _ in CRITERIA}
+CRITERION_IDS_WITH_TDD = CRITERION_IDS | {TDD_CRITERION[0]}
 
 
 def discover_traces(directory: Optional[Path] = None) -> List[Path]:
@@ -2019,7 +2186,7 @@ def _expectation(trace: Optional[Dict[str, Any]], result: Dict[str, Any]) -> Dic
             failures.append("expected_failed_criteria must contain non-empty strings")
         elif len(set(expected_failed)) != len(expected_failed):
             failures.append("expected_failed_criteria must not contain duplicates")
-        elif not set(expected_failed) <= CRITERION_IDS:
+        elif not set(expected_failed) <= CRITERION_IDS_WITH_TDD:
             failures.append("expected_failed_criteria contains an unknown criterion")
         elif set(expected_failed) != set(result.get("failed_criteria", [])):
             failures.append(
@@ -2063,7 +2230,7 @@ def _grade_case(path: Path) -> Dict[str, Any]:
     return result
 
 
-def _report_payload(traces_dir: Path, results: List[Dict[str, Any]], error: str = "") -> Dict[str, Any]:
+def _report_payload(traces_dir: Any, results: List[Dict[str, Any]], error: str = "") -> Dict[str, Any]:
     checks = [
         bool(results),
         not error,
@@ -2120,6 +2287,22 @@ def _format_report(payload: Dict[str, Any]) -> str:
             observed.get("status", "not_available"),
         )
     )
+    tdd = _mapping(metrics.get("tdd"))
+    if tdd and tdd.get("status_counts"):
+        lines.append(
+            "TDD: cycles=%s red=%s green=%s waivers=%s blocked=%s statuses=%s"
+            % (
+                tdd.get("cycles", 0),
+                tdd.get("valid_red", 0),
+                tdd.get("valid_green", 0),
+                tdd.get("waivers", 0),
+                tdd.get("blocked", 0),
+                ",".join(
+                    "%s:%s" % (key, value)
+                    for key, value in _mapping(tdd.get("status_counts")).items()
+                ),
+            )
+        )
     quality_comparison = _mapping(metrics.get("quality_comparison"))
     lines.append(
         "QUALITY: comparison=%s"
@@ -2148,7 +2331,7 @@ def _parser() -> argparse.ArgumentParser:
         "--traces",
         type=Path,
         metavar="DIR",
-        help="directory containing *.json traces (default: evals/traces)",
+        help="directory containing *.json traces (default: evals/traces and evals/traces_v4)",
     )
     parser.add_argument(
         "--json",
@@ -2163,21 +2346,32 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     """Run the trace grader and return a process exit status."""
 
     args = _parser().parse_args(argv)
-    traces_dir = args.traces if args.traces is not None else DEFAULT_TRACES_DIR
+    trace_directories = (
+        [args.traces]
+        if args.traces is not None
+        else [DEFAULT_TRACES_DIR, DEFAULT_TDD_TRACES_DIR]
+    )
+    traces_dir = trace_directories[0] if len(trace_directories) == 1 else "; ".join(
+        str(directory) for directory in trace_directories
+    )
     error = ""
     results: List[Dict[str, Any]] = []
 
     try:
-        if not traces_dir.exists():
-            error = "trace directory does not exist: %s" % traces_dir
-        elif not traces_dir.is_dir():
-            error = "trace path is not a directory: %s" % traces_dir
-        else:
-            paths = discover_traces(traces_dir)
+        paths: List[Path] = []
+        for directory in trace_directories:
+            if not directory.exists():
+                error = "trace directory does not exist: %s" % directory
+                break
+            if not directory.is_dir():
+                error = "trace path is not a directory: %s" % directory
+                break
+            paths.extend(discover_traces(directory))
+        if not error:
             if not paths:
                 error = "no *.json traces found in: %s" % traces_dir
             else:
-                results = [_grade_case(path) for path in paths]
+                results = [_grade_case(path) for path in sorted(paths, key=lambda path: str(path))]
     except OSError as exc:
         error = "cannot inspect trace directory %s: %s" % (traces_dir, exc)
 

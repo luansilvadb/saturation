@@ -6,9 +6,11 @@ from pathlib import Path
 
 EVALS_DIR = Path(__file__).resolve().parent
 TRACES_DIR = EVALS_DIR / "traces"
+TDD_TRACES_DIR = EVALS_DIR / "traces_v4"
 sys.path.insert(0, str(EVALS_DIR))
 import grader  # noqa: E402
 import prompt_contract  # noqa: E402
+import tdd_contract  # noqa: E402
 import token_metrics  # noqa: E402
 
 
@@ -16,6 +18,7 @@ class GraderTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.complete = grader.load_trace(TRACES_DIR / "complete.json")
+        cls.complete_v4 = grader.load_trace(TDD_TRACES_DIR / "complete.json")
 
     def grade(self, name):
         return grader.grade_file(TRACES_DIR / name)
@@ -55,6 +58,101 @@ class GraderTests(unittest.TestCase):
         self.assertEqual(result["metrics"]["pcp"]["average"], 3)
         self.assertEqual(result["metrics"]["strategy_counts"], {"direct": 5})
 
+    def test_tdd_workflow(self):
+        """The persisted v4 fixture is the executable TDD contract artifact."""
+
+        result = grader.grade_trace(self.complete_v4, "v4-complete")
+        self.assertEqual(
+            (result["decision"], result["score"], result["max_score"], result["grade"]),
+            ("ACCEPT", 120, 120, "A"),
+        )
+        self.assertEqual(result["metrics"]["tdd"]["valid_red"], 1)
+        self.assertEqual(result["metrics"]["tdd"]["valid_green"], 1)
+
+    def tdd_mutate(self, mutation):
+        trace = copy.deepcopy(self.complete_v4)
+        mutation(trace)
+        return grader.grade_trace(trace, "v4-mutation")
+
+    def assert_tdd_rejected(self, mutation):
+        result = self.tdd_mutate(mutation)
+        self.assertEqual(result["decision"], "REJECT")
+        self.assertIn("tdd_workflow", result["failed_criteria"])
+        return result
+
+    def test_v4_validation_is_non_mutating(self):
+        trace = copy.deepcopy(self.complete_v4)
+        before = copy.deepcopy(trace)
+        self.assertEqual(grader.validate_trace(trace), [])
+        self.assertEqual(trace, before)
+
+    def test_red_must_be_a_real_missing_behavior_failure(self):
+        def mutation(trace):
+            run = next(item for item in trace["tdd"]["runs"] if item["kind"] == "red")
+            run.update(status="pass", exit_code=0, failed_test_ids=[], failure_reason=None)
+
+        self.assert_tdd_rejected(mutation)
+
+    def test_red_must_not_be_a_syntax_failure(self):
+        def mutation(trace):
+            run = next(item for item in trace["tdd"]["runs"] if item["kind"] == "red")
+            run["failure_reason"] = "syntax_error"
+
+        self.assert_tdd_rejected(mutation)
+
+    def test_test_artifact_is_locked_after_red(self):
+        def mutation(trace):
+            event = self.event(trace, "E-003")
+            event["writes"].append(".agents/skills/saturation/evals/test_grader.py")
+
+        self.assert_tdd_rejected(mutation)
+
+    def test_tdd_commands_reject_shell_metacharacters(self):
+        def mutation(trace):
+            trace["tdd"]["commands"]["target"]["argv"].append("&")
+
+        self.assert_tdd_rejected(mutation)
+
+    def test_verifier_must_be_independent(self):
+        def mutation(trace):
+            trace["actors"]["ver"]["role"] = "implementer"
+
+        self.assert_tdd_rejected(mutation)
+
+    def test_trace_hash_is_an_integrity_gate(self):
+        def mutation(trace):
+            trace["tdd"]["persisted_trace"]["sha256"] = "0" * 64
+
+        self.assert_tdd_rejected(mutation)
+
+    def test_approved_documentation_exemption_can_skip_the_cycle(self):
+        trace = copy.deepcopy(self.complete_v4)
+        tdd = trace["tdd"]
+        tdd.update(
+            classification="exempt",
+            exemption={
+                "kind": "documentation_only",
+                "reason": "The assignment changes only operational documentation.",
+                "alternative": "Independent documentation diff review.",
+                "approved_by_actor_id": "orch",
+                "evidence": ["EV-inspect"],
+            },
+            commands={},
+            test_artifacts=[],
+            test_ids=[],
+            acceptance_map=[],
+            cycles=[],
+            runs=[],
+            verifier_run_id=None,
+        )
+        tdd["persisted_trace"]["sha256"] = tdd_contract._trace_hash(trace)
+        result = grader.grade_trace(trace, "v4-exempt")
+        self.assertEqual(
+            (result["decision"], result["score"], result["grade"]),
+            ("ACCEPT", 120, "A"),
+        )
+        self.assertEqual(result["metrics"]["tdd"]["waivers"], 1)
+
     def test_all_regressions_are_rejected_with_exact_targets(self):
         fixtures = [
             path for path in grader.discover_traces(TRACES_DIR)
@@ -73,16 +171,20 @@ class GraderTests(unittest.TestCase):
 
     def test_rubric_mirrors_grader_checks_and_fixture_matrix(self):
         rubric = grader.load_trace(EVALS_DIR / "rubric.json")
-        result = grader.grade_trace(copy.deepcopy(self.complete), "rubric-check")
-        actual_checks = {
-            criterion["id"]: [check["id"] for check in criterion["checks"]]
-            for criterion in result["criteria"]
-        }
         declared_checks = {
             criterion["id"]: criterion["checks"]
             for criterion in rubric["criteria"]
         }
-        self.assertEqual(declared_checks, actual_checks)
+        for trace in (self.complete, self.complete_v4):
+            result = grader.grade_trace(copy.deepcopy(trace), "rubric-check")
+            actual_checks = {
+                criterion["id"]: [check["id"] for check in criterion["checks"]]
+                for criterion in result["criteria"]
+            }
+            self.assertEqual(
+                {criterion_id: declared_checks[criterion_id] for criterion_id in actual_checks},
+                actual_checks,
+            )
 
         declared_matrix = {
             row["trace"]: (row["decision"], row["failed_criteria"])
@@ -96,6 +198,10 @@ class GraderTests(unittest.TestCase):
             for path in grader.discover_traces(TRACES_DIR)
             for trace in [grader.load_trace(path)]
         }
+        fixture_matrix["traces_v4/complete.json"] = (
+            self.complete_v4["expected_decision"],
+            self.complete_v4["expected_failed_criteria"],
+        )
         self.assertEqual(declared_matrix, fixture_matrix)
 
     def test_fixture_incomplete_handoff_has_missing_stop(self):
@@ -687,6 +793,27 @@ class GraderTests(unittest.TestCase):
         self.assertIn("SUMMARY: PASS", completed.stdout)
         self.assertIn("TOKENS: ", completed.stdout)
         self.assertIn("QUALITY: comparison=deferred", completed.stdout)
+
+    def test_cli_default_grades_v3_and_v4(self):
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-B",
+                str(EVALS_DIR / "report.py"),
+            ],
+            cwd=EVALS_DIR.parents[4],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            completed.stdout + completed.stderr,
+        )
+        self.assertIn("TRACES: 23", completed.stdout)
+        self.assertIn("score 120/120", completed.stdout)
+        self.assertIn("TDD: cycles=1 red=1 green=1", completed.stdout)
 
 
 if __name__ == "__main__":

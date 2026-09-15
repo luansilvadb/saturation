@@ -3,7 +3,8 @@
 These deterministic, standard-library-only evals grade the observable
 workflow of the `saturation` skill: frozen context, scoped assignments, fresh
 handoffs, independent review, repair/reverification, escalation, completion
-gates, and the v3 prompt contract.
+gates, the versioned prompt contract, and (for new implementation traces) the
+test-first red/green workflow.
 
 ## Evaluation flow
 
@@ -37,14 +38,19 @@ python .agents/skills/saturation/evals/test_grader.py
 ```
 
 The prompt validator accepts `--json` for machine-readable errors. The report
-accepts `--traces DIR` and `--json`. It exits 0 only when all fixtures match
-their declared expectations and every `ACCEPT` is exactly `110/110` with
+accepts `--traces DIR` and `--json`; without `--traces` it grades both the v3
+and v4 fixture directories. It exits 0 only when all fixtures match their
+declared expectations and every `ACCEPT` reaches the exact maximum score with
 grade `A`.
 
 The fixture grader deliberately narrows synthetic `read_scope` values to the
 context, style-guide, and eval roots so the fixtures stay self-contained. That
 test-only boundary does not limit the general `saturation` skill, which may
 read explicitly assigned product paths.
+
+The repository workflow `.github/workflows/tests.yml` runs these checks on
+Ubuntu and Windows with Python 3.11 and 3.14. Branch protection must mark its
+status check as required separately.
 
 ## Prompt contract v3
 
@@ -122,6 +128,46 @@ Prompt text normalization is deterministic: CRLF/CR to LF, Unicode NFC,
 trailing line-ending whitespace removed, edge blank lines removed, exactly one
 final LF, then UTF-8 lowercase SHA-256. The validator recalculates the hash.
 
+## TDD policy v1 and trace schema v4
+
+New implementation and repair traces use schema v4 and declare
+`trace_contract.tdd` as `tdd-v1`. The v4 grader preserves the 11 v3 workflow
+criteria and adds `tdd_workflow`, for an exact `120/120 A` acceptance. Existing
+v3 traces remain valid at `110/110 A` and are not retrofitted with TDD fields.
+
+The required TDD ledger records:
+
+- a pre-dispatch testability classification, clean baseline revision,
+  non-overlapping worktree, and immutable structured `target` and
+  `regression` commands;
+- persisted executable test artifacts and stable test IDs, with an explicit
+  map from every behavioral acceptance criterion to its test IDs;
+- one or more bounded cycles linking a fresh `test_first` handoff and
+  `test_first.v1` prompt to a red run, a passing TDD gate, implementation,
+  green target run, and full regression run;
+- red evidence showing discovered tests fail due to `missing_behavior`, not a
+  syntax/import/environment/runner error, and an immutable test-artifact path
+  after red;
+- an independent verifier regression run, redacted canonical trace
+  persistence under `.saturation/runs/`, and a SHA-256 integrity record.
+
+Commands are argv arrays with explicit cwd and timeout, `network: false`, and
+`side_effects: "none"`; dependency installation is outside the TDD command
+contract. A failed green or regression run starts a fresh repair cycle, keeps
+the existing failing test and evidence, and is bounded to three retries.
+Documentation-only and metadata-only work may omit the cycle only with an
+approved, evidenced exemption that names the reason and alternative
+verification. All other testable implementation work is rejected if the
+TDD ledger is absent or incomplete.
+
+The enforcement is protocol-level. The grader, report, and CI block promotion
+when the record is missing or inconsistent, but a future dispatcher is needed
+to physically prevent a direct session from writing product code before red.
+
+TDD metrics are descriptive and include cycle, red, green, waiver, blocker,
+and retry counts; they do not alter the decision outside the `tdd_workflow`
+criterion.
+
 ## Trace schema and grading
 
 Schema v3 requires a strict `trace_contract` containing the workflow
@@ -131,14 +177,21 @@ non-empty `trace_id`, `objective`, `allowed_write_roots`, `actors`,
 unique causal sequence. Handoffs use typed `context`, `assignment`, `state`,
 `input`, `output`, `error`, `stop`, `evidence`, and `fresh_session` fields.
 
+Schema v4 retains that contract and adds the exact `tdd` ledger described
+above. Its prompt catalog adds one `test_first.v1` record; the other phase
+contracts remain the v3 contracts. The v4 verifier criteria include
+`tdd_workflow`.
+
 The verifier is fresh, independent, read-only, and must cover the four base
 dimensions (`completeness`, `clarity`, `consistency`, `testability`), any
-declared optional dimensions, and all 11 rubric criteria, including
-`prompt_contract`. Review events cover every prompt and blocked attempt and
-acknowledge every PCP warning.
+declared optional dimensions, and all rubric criteria: 11 for v3 and 12 for
+v4, including `prompt_contract` and (in v4) `tdd_workflow`. Review events
+cover every prompt and blocked attempt and acknowledge every PCP warning.
 
-There are 11 criteria worth 10 points each. Acceptance is exact: `ACCEPT`
-requires `110/110` and grade `A`; any failed criterion produces `REJECT`.
+There are 11 v3 criteria worth 10 points each and 12 v4 criteria after adding
+`tdd_workflow`. Acceptance is exact: v3 `ACCEPT` requires `110/110` and v4
+`ACCEPT` requires `120/120`, both with grade `A`; any failed criterion produces
+`REJECT`.
 Fixture fields `expected_decision` and `expected_failed_criteria` are checked
 as assertions and never override the grade.
 
@@ -151,8 +204,8 @@ benchmark outcome statistics.
 ## Token telemetry
 
 Token metrics are observational only. They never cap, truncate, skip, or
-otherwise change a dispatch, and they never change the 110-point workflow
-grade. The fixture estimate is calculated from each normalized
+otherwise change a dispatch, and they never change the workflow grade. The
+fixture estimate is calculated from each normalized
 `rendered_prompt` using the versioned `utf8_bytes_div4_v1` proxy:
 
 ```text
@@ -206,6 +259,7 @@ guardrail, not a quality score.
 | Trace | Expected result | Target criterion(s) |
 |---|---|---|
 | `complete.json` | ACCEPT, 110/A | none |
+| `traces_v4/complete.json` | ACCEPT, 120/A | none; required TDD cycle |
 | `incomplete_handoff.json` | REJECT | `handoff_payload` |
 | `missing_freeze.json` | REJECT | `context_freeze` |
 | `missing_handoff_contract.json` | REJECT | `handoff_payload` |

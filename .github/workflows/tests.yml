@@ -1,0 +1,46 @@
+name: Saturation evals
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  evals:
+    name: Python ${{ matrix.python-version }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ['3.11', '3.14']
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Validate v3 prompt contract
+        run: >-
+          python -B .agents/skills/saturation/evals/prompt_contract.py
+          --trace .agents/skills/saturation/evals/traces/complete.json
+          --root .
+
+      - name: Validate v4 prompt contract
+        run: >-
+          python -B .agents/skills/saturation/evals/prompt_contract.py
+          --trace .agents/skills/saturation/evals/traces_v4/complete.json
+          --root .
+
+      - name: Grade all traces
+        run: python -B .agents/skills/saturation/evals/report.py
+
+      - name: Run focused tests
+        run: python -B .agents/skills/saturation/evals/test_grader.py

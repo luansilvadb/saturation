@@ -18,6 +18,9 @@ governs how their relevant rules become an agent prompt.
     then dispatch. A failed pre-dispatch check blocks dispatch.
 -   Keep a dispatched prompt immutable. A change to its scope, modules,
     strategy, contract, or wording requires a new prompt and hash.
+-   New implementation runs use trace schema v4 and add the bounded
+    `test_first` phase; schema v3 remains the compatibility format for
+    historical traces.
 
 ## Canonical prompt shape
 
@@ -157,7 +160,15 @@ The declared phase contracts and their minimum actor keys are:
 | `completion_gate.v3` | `decision`, `context_frozen`, `scope_checked`, `independent_review`, `latest_review_clear`, `verification_passed`, `promotion_reviewed`, `no_unresolved_blocker`, `evidence`, `tool_call_ref` |
 
 When a phase needs additional fields, extend the declared contract in a new
-policy/schema version; do not silently invent a prose-only substitute.
+policy/schema version; do not silently invent a prose-only substitute. Schema
+v4 adds `test_first.v1` for the test-artifact phase while retaining the v3
+contracts for the other phases.
+
+The `test_first.v1` actor result contains exactly these minimum keys:
+`tool_call_ref`, `handoff_ref`, `cycle_id`, `mode`, `test_artifact_paths`, and
+`red_run`. The test-first actor writes only the declared test artifacts; the
+orchestrator records the red run and opens the implementation handoff only
+after that run passes the TDD gate.
 
 ## Prompt Complexity Points (PCP)
 
@@ -276,12 +287,23 @@ Use the common prompt shape with these profile constraints:
 
 | Profile | Authority and writes | Typical output |
 |---|---|---|
+| `test_first` | Fresh implementer session; write only executable test artifacts. | `test_first.v1` |
 | `implementer` | Write only assigned paths. | `implementation.v3` |
 | `reviewer` | Read-only, adversarial, no writes. | `review.v3` |
 | `repairer` | Write only assigned paths and resolve named gaps. | `repair.v3` |
 | `verifier` | Fresh, independent, read-only; recheck every gap. | `verification.v3` |
 | `final_reviewer` | Fresh, read-only; confirm no material gaps. | `final_review.v3` |
 | `orchestrator` | Use the narrow authority of the action; promote only after gates. | Action-specific v3 contract |
+
+For a testable implementation or repair, the profile sequence is
+`baseline → test_first → red → tdd_gate → implementation → green →
+regression`. The target and regression commands are recorded as structured
+argument vectors with explicit cwd, timeout, no network, and no side effects.
+The red run must fail because behavior is missing, not because the test or
+runner is broken. After red, test artifact paths are locked. Green requires
+the target and full regression commands to pass, and a fresh verifier must
+execute the regression command independently. Documentation-only and
+metadata-only work may use an approved, evidenced exemption.
 
 ## Examples
 
