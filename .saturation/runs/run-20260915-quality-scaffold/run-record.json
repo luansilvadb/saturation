@@ -1,0 +1,235 @@
+{
+  "record_version": "quality-scaffold-run-v1",
+  "run_id": "run-20260915-quality-scaffold",
+  "trace_id": "trace-quality-scaffold-20260915",
+  "status": "blocked",
+  "base_revision": "43ef8535c04d75b4d82007590fb8577633b97469",
+  "parent_context": {
+    "path": ".saturation/context.md",
+    "frozen": true,
+    "sha256": "148f1f0fa8b4c992e5e3d98df4ad28e5d28b3da6dc3402f2ec687660b29645b6"
+  },
+  "run_context": {
+    "path": ".saturation/runs/run-20260915-quality-scaffold/context.md",
+    "frozen": true,
+    "sha256": "db8d444211189c62c0e149ff37bf9696605ad1aaa959e3cdf3ced4de814af3cb"
+  },
+  "objective": "Add a versioned, deterministic evaluation path for delegated correctness.",
+  "quality_claim": {
+    "status": "deferred",
+    "quality_delta": null,
+    "reason": "No real paired benchmark outcomes were run."
+  },
+  "preexisting_out_of_scope": [
+    ".gitignore",
+    ".agents/skills/grilling/",
+    ".saturation/context.md"
+  ],
+  "prompt_artifacts": [
+    {
+      "prompt_id": "P-001",
+      "path": ".saturation/runs/run-20260915-quality-scaffold/prompts/P-001-test-first.md",
+      "sha256": "e1721c7b4b4cd1c3996329a5eb493b81d588e5e5823a4fe359db34620c2a59d4",
+      "phase": "test_first"
+    },
+    {
+      "prompt_id": "P-002",
+      "path": ".saturation/runs/run-20260915-quality-scaffold/prompts/P-002-test-first.md",
+      "sha256": "a5a73568d857aa46cf03dd41d5ba7b648d1d01d3d5af40b64339477b044dfb94",
+      "phase": "test_first"
+    },
+    {
+      "prompt_id": "P-003",
+      "path": ".saturation/runs/run-20260915-quality-scaffold/prompts/P-003-implementation.md",
+      "sha256": "043f34639a655d29520eef90b40c9c8f4171b852d3bca806a78cfaf4085caa1b",
+      "phase": "implementation"
+    },
+    {
+      "prompt_id": "P-004",
+      "path": ".saturation/runs/run-20260915-quality-scaffold/prompts/P-004-review.md",
+      "sha256": "12b926c4dcb0038c0ab6bc6e34e97a9f02195a8c80e97fb56c71ab5e2c08f298",
+      "phase": "review"
+    },
+    {
+      "prompt_id": "P-005",
+      "path": ".saturation/runs/run-20260915-quality-scaffold/prompts/P-005-review-retry.md",
+      "sha256": "f2857b30eda2c05bc16e4498a29e4959cb8025f30778bc6c8cf7719fbcdc8d38",
+      "phase": "review_retry"
+    }
+  ],
+  "delegation": [
+    {
+      "prompt_id": "P-001",
+      "agent_id": "01a0a420-14e6-7203-8f97-2f74925b589c",
+      "status": "timeout_no_write"
+    },
+    {
+      "prompt_id": "P-002",
+      "agent_id": "01a0a424-b912-7cd0-b794-c2cc73e31931",
+      "status": "timeout_no_write"
+    },
+    {
+      "prompt_id": "P-003",
+      "agent_id": "01a0a428-51fa-76b2-9f24-28280d617565",
+      "status": "timeout_no_write"
+    },
+    {
+      "prompt_id": "P-004",
+      "agent_id": "01a0a446-097c-75e0-bdcc-b01a6c337e5c",
+      "status": "timeout_no_review"
+    },
+    {
+      "prompt_id": "P-005",
+      "agent_id": "01a0a453-d54f-7940-85c1-12f7527d25c2",
+      "status": "timeout_no_review"
+    }
+  ],
+  "tdd": {
+    "red": {
+      "evidence_id": "EV-TDD-RED-QUALITY",
+      "artifact": ".saturation/runs/run-20260915-quality-scaffold/tdd-red-evidence.md",
+      "exit_code": 1,
+      "discovered_tests": 13,
+      "failure_class": "missing_behavior"
+    },
+    "green": {
+      "evidence_id": "EV-TDD-GREEN-QUALITY",
+      "command": "python -B .agents/skills/saturation/evals/test_quality_comparison.py",
+      "exit_code": 0,
+      "tests": 13
+    },
+    "regression": {
+      "evidence_id": "EV-TDD-REGRESSION-QUALITY",
+      "command": "python -B .agents/skills/saturation/evals/test_grader.py",
+      "exit_code": 0,
+      "tests": 77
+    }
+  },
+  "implementation": {
+    "status": "complete_local_fallback",
+    "reason": "The delegated implementation session timed out without a write.",
+    "changed_paths": [
+      ".agents/skills/saturation/evals/reasoning_scaffold.py",
+      ".agents/skills/saturation/evals/quality_comparison.py",
+      ".agents/skills/saturation/evals/test_quality_comparison.py",
+      ".agents/skills/saturation/evals/test_quality_comparison_edges.py",
+      ".agents/skills/saturation/evals/test_quality_comparison_missing_branches.py",
+      ".agents/skills/saturation/evals/test_quality_comparison_numeric_edges.py",
+      ".agents/skills/saturation/SKILL.md",
+      ".agents/skills/saturation/code_styleguides/prompting.md",
+      ".agents/skills/saturation/evals/README.md",
+      "README.md",
+      ".github/workflows/tests.yml",
+      ".agents/skills/saturation/evals/traces/complete.json",
+      ".agents/skills/saturation/evals/traces/incomplete_handoff.json",
+      ".agents/skills/saturation/evals/traces/missing_declared_optional_dimension.json",
+      ".agents/skills/saturation/evals/traces/missing_freeze.json",
+      ".agents/skills/saturation/evals/traces/missing_handoff_contract.json",
+      ".agents/skills/saturation/evals/traces/missing_reverify.json",
+      ".agents/skills/saturation/evals/traces/missing_tool_event_ref.json",
+      ".agents/skills/saturation/evals/traces/missing_verifier_dimension_criterion.json",
+      ".agents/skills/saturation/evals/traces/out_of_read_scope.json",
+      ".agents/skills/saturation/evals/traces/out_of_scope_write.json",
+      ".agents/skills/saturation/evals/traces/premature_completion.json",
+      ".agents/skills/saturation/evals/traces/prompt_attempt_limit.json",
+      ".agents/skills/saturation/evals/traces/prompt_bad_hash.json",
+      ".agents/skills/saturation/evals/traces/prompt_bad_headings.json",
+      ".agents/skills/saturation/evals/traces/prompt_bad_pcp.json",
+      ".agents/skills/saturation/evals/traces/prompt_missing_reverse_link.json",
+      ".agents/skills/saturation/evals/traces/prompt_strategy_gate.json",
+      ".agents/skills/saturation/evals/traces/prompt_untrusted_boundary.json",
+      ".agents/skills/saturation/evals/traces/reviewer_not_readonly.json",
+      ".agents/skills/saturation/evals/traces/unrelated_evidence_tool_link.json",
+      ".agents/skills/saturation/evals/traces/wrong_tool_order.json",
+      ".agents/skills/saturation/evals/traces_v4/complete.json"
+    ]
+  },
+  "verification": [
+    {
+      "evidence_id": "EV-QUALITY-CONTRACT",
+      "command": "python -B .agents/skills/saturation/evals/test_quality_comparison.py",
+      "exit_code": 0,
+      "tests": 13
+    },
+    {
+      "evidence_id": "EV-QUALITY-EDGES",
+      "command": "python -B .agents/skills/saturation/evals/test_quality_comparison_edges.py",
+      "exit_code": 0,
+      "tests": 4
+    },
+    {
+      "evidence_id": "EV-QUALITY-BRANCHES",
+      "command": "python -B .agents/skills/saturation/evals/test_quality_comparison_missing_branches.py",
+      "exit_code": 0,
+      "tests": 2
+    },
+    {
+      "evidence_id": "EV-QUALITY-NUMERIC",
+      "command": "python -B .agents/skills/saturation/evals/test_quality_comparison_numeric_edges.py",
+      "exit_code": 0,
+      "tests": 3
+    },
+    {
+      "evidence_id": "EV-HISTORICAL-REPORT",
+      "command": "python -B .agents/skills/saturation/evals/report.py",
+      "exit_code": 0,
+      "traces": 23,
+      "quality_comparison": "deferred"
+    },
+    {
+      "evidence_id": "EV-PROMPT-V3",
+      "command": "python -B .agents/skills/saturation/evals/prompt_contract.py --trace .agents/skills/saturation/evals/traces/complete.json --root .",
+      "exit_code": 0
+    },
+    {
+      "evidence_id": "EV-PROMPT-V4",
+      "command": "python -B .agents/skills/saturation/evals/prompt_contract.py --trace .agents/skills/saturation/evals/traces_v4/complete.json --root .",
+      "exit_code": 0
+    },
+    {
+      "evidence_id": "EV-DETERMINISM",
+      "result": "pass",
+      "digest": "4f7bb94a6c3c10409a9c925d8596ada28977e7b46ccc4294fe95d04a8d220ede"
+    }
+  ],
+  "coverage": {
+    "evidence_id": "EV-COVERAGE-QUALITY",
+    "adapter": "stdlib-trace-branch-v1",
+    "adapter_path": ".saturation/runs/run-20260915-quality-scaffold/coverage/adapter.py",
+    "report_path": ".saturation/runs/run-20260915-quality-scaffold/coverage/coverage-report.json",
+    "report_sha256": "caabeef7f9001e3282cd5b0535d231d759e6e5381d63691fd41ad259c3d5384e",
+    "threshold_percent": 80.0,
+    "line_percent": 93.19,
+    "branch_percent": 81.58,
+    "status": "pass"
+  },
+  "review": {
+    "fallback_path": ".saturation/runs/run-20260915-quality-scaffold/review-local.md",
+    "fallback_status": "blocked_pending_independent_review",
+    "independent_review_status": "unavailable_after_two_bounded_attempts",
+    "finding_ids": ["FINDING-001"]
+  },
+  "final_gate": {
+    "decision": "blocked",
+    "flags": {
+      "context_frozen": true,
+      "scopes_checked": true,
+      "independent_review_complete": false,
+      "verification_passed": true,
+      "promotion_reviewed": false,
+      "no_blocker_remains": false,
+      "claims_evidenced": true
+    },
+    "reason": "FINDING-001: fresh read-only review did not return."
+  },
+  "unresolved_risks": [
+    "FINDING-001: complete a fresh independent read-only review before promotion."
+  ],
+  "redaction": {
+    "status": "applied",
+    "secrets": "redacted",
+    "pii": "redacted",
+    "raw_oracle": "not_recorded",
+    "hidden_reasoning": "not_recorded"
+  }
+}

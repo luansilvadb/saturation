@@ -116,6 +116,20 @@ PCP, workflow grades, or other same-version signals. Defer quality deltas to
 the next explicitly versioned prompt/harness comparison, which must identify
 baseline and candidate versions and record real outcome observations.
 
+The future comparison path uses `reasoning-scaffold-v1` only as an adaptive,
+orchestrator-owned prompt modifier for implementation and repair tasks. It is
+activated by an evidenced interdependent acceptance branch, cross-module or
+data-flow dependency, or material repair. A user decision requirement blocks
+and escalates; tokens, PCP, prompt length, and actor preference never activate
+it. The scaffold asks only for a concise intended behavior, assumptions,
+invariants and risks, planned checks, and evidence references. It never asks
+for hidden chain-of-thought or a private scratchpad. Current v3/v4/v5 traces
+remain unchanged; a future quality comparison uses the separate
+`quality-comparison-v1` contract with distinct versions, sealed oracle data,
+three or more paired repetitions, task-level macro aggregation, a
+pre-registered 0.05 lift, a deterministic uncertainty interval, and zero
+critical candidate regressions.
+
 For every implementation or repair assignment whose behavior is testable,
 enforce the `tdd-v1` cycle before allowing promotion:
 

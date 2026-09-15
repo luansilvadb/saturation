@@ -85,6 +85,8 @@ flowchart TD
     ├── tdd_contract.py         # Schema v4 test-first/red-green contract
     ├── coverage_contract.py    # Schema v5 line/branch coverage contract
     ├── token_metrics.py        # Descriptive prompt-input token metrics
+    ├── reasoning_scaffold.py   # Future adaptive scaffold routing policy
+    ├── quality_comparison.py   # Future paired outcome comparison contract
     ├── report.py               # Portable command-line entry point
     ├── rubric.json             # Grading criteria and fixture matrix
     ├── test_grader.py          # Focused unit tests
@@ -132,6 +134,17 @@ does not measure quality increases or decreases; that requires a future
 versioned prompt/harness comparison with baseline and candidate outcomes.
 Reports expose this boundary as `metrics.quality_comparison.status=deferred`
 with no quality delta.
+
+The future comparison path is implemented separately in
+`.agents/skills/saturation/evals/quality_comparison.py`. It requires distinct
+baseline and candidate versions, immutable task/oracle versions, controlled
+environment metadata, at least three paired repetitions per task, task-level
+macro aggregation, a pre-registered `0.05` minimum lift, and no critical
+candidate regression. The companion
+`.agents/skills/saturation/evals/reasoning_scaffold.py` activates a concise
+structured scaffold only for evidenced task dependencies or material repairs;
+it never requests hidden chain-of-thought. No current workflow grade changes
+until a future comparison contains real outcome observations.
 
 The checked-in GitHub Actions workflow (`.github/workflows/tests.yml`) runs
 the v3/v4 validators, aggregate report, and focused tests (including the

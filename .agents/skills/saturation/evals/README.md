@@ -35,6 +35,10 @@ From the repository root:
 python .agents/skills/saturation/evals/prompt_contract.py --trace .agents/skills/saturation/evals/traces/complete.json --root .
 python .agents/skills/saturation/evals/report.py
 python .agents/skills/saturation/evals/test_grader.py
+python .agents/skills/saturation/evals/test_quality_comparison.py
+python .agents/skills/saturation/evals/test_quality_comparison_edges.py
+python .agents/skills/saturation/evals/test_quality_comparison_missing_branches.py
+python .agents/skills/saturation/evals/test_quality_comparison_numeric_edges.py
 ```
 
 The prompt validator accepts `--json` for machine-readable errors. The report
@@ -282,6 +286,28 @@ Every graded result and the aggregate report expose this boundary as
 `metrics.quality_comparison` with `status: "deferred"`, `quality_delta: null`,
 and reason `future_versioned_outcome_comparison_required`. This field is a
 guardrail, not a quality score.
+
+## Future quality comparison and scaffold
+
+`reasoning_scaffold.py` provides the deterministic `reasoning-scaffold-v1`
+routing policy. It keeps `direct` as the default, activates only for the three
+approved task signals, and escalates when a user decision is required. Its
+structured fields are intended to improve observable decisions and checks;
+they are not a request for hidden chain-of-thought.
+
+`quality_comparison.py` provides the separate `quality-comparison-v1`
+evaluator. It accepts only distinct baseline and candidate versions, immutable
+task and oracle versions, controlled environment metadata, at least three
+paired repetitions per task, and sealed run observations. It computes
+task-level macro pass rates, a candidate-minus-baseline delta, a deterministic
+paired-bootstrap interval, and a decision. The initial pre-registered
+meaningful lift is `0.05`; candidate critical regressions or workflow-gate
+failures reject the comparison. Raw oracle content and private reasoning are
+never accepted by the contract.
+
+This path is intentionally separate from the current workflow grade. A valid
+comparison requires real outcome data and explicit version identities; tokens,
+PCP, and same-version traces cannot establish a quality improvement.
 
 ## Regression matrix
 

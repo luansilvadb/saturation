@@ -44,3 +44,21 @@ jobs:
 
       - name: Run focused tests
         run: python -B .agents/skills/saturation/evals/test_grader.py
+
+      - name: Run quality comparison tests
+        run: python -B .agents/skills/saturation/evals/test_quality_comparison.py
+
+      - name: Run quality comparison edge tests
+        run: >-
+          python -B
+          .agents/skills/saturation/evals/test_quality_comparison_edges.py
+
+      - name: Run quality comparison branch tests
+        run: >-
+          python -B
+          .agents/skills/saturation/evals/test_quality_comparison_missing_branches.py
+
+      - name: Run quality comparison numeric edge tests
+        run: >-
+          python -B
+          .agents/skills/saturation/evals/test_quality_comparison_numeric_edges.py

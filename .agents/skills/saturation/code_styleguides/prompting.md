@@ -287,6 +287,33 @@ protocol merely to make a prompt look complete. The bounded
 review → repair → verify lifecycle is the reflection loop. Use high-level
 reasoning constraints and explicit outputs instead of manual chain-of-thought.
 
+## Structured reasoning scaffold for a future comparison
+
+The current v3, v4, and v5 contracts do not claim a quality delta. A future,
+explicitly versioned comparison MAY test a bounded scaffold, but it MUST keep
+the current `direct` default and MUST NOT add a global “think step by step”
+instruction.
+
+The orchestrator owns activation. It records exactly these preflight signals:
+`interdependent_acceptance`, `cross_module_dependency`,
+`material_repair`, and `requires_user_decision`. Any of the first three may
+activate `reasoning-scaffold-v1`; the last one escalates and blocks routing
+until the user decides. Tokens, PCP, prompt length, and actor preference are
+not activation signals.
+
+When activated, inject only a concise structured request for
+`intended_behavior`, `assumptions`, `invariants_and_risks`, `planned_checks`,
+and `evidence_refs`. The actor MUST NOT return hidden chain-of-thought, a
+private scratchpad, secrets, or unnecessary PII. If these fields become a
+validated actor output rather than prompt guidance, add them through a new
+schema version; do not silently extend an existing phase contract.
+
+Record the scaffold policy version, decision, canonical trigger codes, reason,
+and selection evidence. Keep the scaffold result separate from the workflow
+grade and evaluate it only through a future paired comparison with distinct
+baseline and candidate versions, an immutable task/oracle suite, independent
+outcomes, and the declared no-critical-regression rule.
+
 ## Output contracts
 
 Use one declared `output_contract_id` that matches the phase and active trace
