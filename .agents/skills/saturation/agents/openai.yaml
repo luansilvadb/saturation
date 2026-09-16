@@ -1,4 +1,4 @@
 interface:
   display_name: "Saturation"
-  short_description: "Deliver polished, launch-ready implementations"
-  default_prompt: "Use $saturation as a quality-first technical consultancy: perform technical discovery, freeze .saturation/context.md, delegate to the fixed specialist team with deep scoped briefs, iterate through the task-specific harness and launch gates, and return an evidence-backed production candidate."
+  short_description: "Orchestrate a risk-adaptive specialist team"
+  default_prompt: "Use $saturation to orchestrate a risk-adaptive team of specialist subagents through discovery, implementation, validation, and an evidence-backed delivery."

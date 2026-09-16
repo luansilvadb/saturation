@@ -22,6 +22,10 @@ The focused evaluator checks only useful invariants:
 - only an approved final integration reaches the workspace;
 - no saturation runtime artifact is persisted.
 
+The `team_contract.py` evaluator additionally validates the fixed nine-role
+library, explicit `full`/`hotfix`/`refactor` routing, the in-memory handoff
+envelope, private-field rejection, and the three-failure circuit breaker.
+
 TDD, review, repair, verification, coverage, and task-specific release checks
 can be represented as `check` events. The evaluator accepts `skip` or
 `not_applicable` for genuinely irrelevant actions, but a launch-ready runtime
@@ -65,6 +69,7 @@ From the repository root:
 
 ```text
 python -B .agents/skills/saturation/evals/test_grader.py
+python -B .agents/skills/saturation/evals/test_team_contract.py
 python -B .agents/skills/saturation/evals/test_quality_comparison.py
 python -B .agents/skills/saturation/evals/test_quality_comparison_edges.py
 python -B .agents/skills/saturation/evals/test_quality_comparison_missing_branches.py
