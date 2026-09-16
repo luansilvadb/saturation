@@ -13,8 +13,7 @@ When `$saturation` runs, it:
 2. conducts a separate technical-discovery conversation;
 3. records the consolidated contract in the frozen per-cycle
    `.saturation/cycles/<cycle_id>/context.md`;
-4. delegates to the fixed v1 specialist team through deep, traceable,
-   role-specific runtime briefs;
+4. delegates to the fixed specialist team through role-specific runtime briefs;
 5. implements complete in-scope behavior and does not optimize internal
    tokens or iterations;
 6. runs integration, repair, a task-specific harness, and target-environment
@@ -30,14 +29,18 @@ irreversible actions, and production deployment require explicit approval.
 ## Context and team boundaries
 
 `grilling` refines what is being built. `saturation` refines how it will be
-delivered. The technical briefing is consolidated into the frozen per-cycle
-`.saturation/cycles/<cycle_id>/context.md`; prompts, role briefs, traces, and
-evaluation data remain ephemeral.
+delivered. The technical briefing and every decision approved during the run are
+recorded in the frozen per-cycle `.saturation/cycles/<cycle_id>/context.md`,
+which is the single record for that cycle; prompts, role briefs, traces, and run
+data remain ephemeral.
 
-The lead is the only user-facing agent. Specialists work in fresh sessions
-with disjoint write scopes, relevant style guides, and only the context and
-files needed for their roles. The lead integrates their work and owns the
-final quality gate.
+The lead is the main session and the only user-facing agent. Eight specialist
+contracts in `agents/` carry the specialist work in disjoint write scopes with
+the style guides their roles need. `final-reviewer`, `qa-harness`, and
+`security-privacy-ip` always work in fresh sessions, because their independence
+is the evidence; other specialists may reuse a session when the runtime is
+constrained, and the reuse is recorded in the cycle context. The lead integrates
+their work and owns the final quality gate.
 
 ## Launch readiness
 
@@ -51,35 +54,26 @@ The default result is ready for the user to deploy, not an automatic production
 change. Defects that violate the original scope remain the responsibility of
 the saturation service; new capabilities are new scope.
 
-## Evaluation
+## Verification status
 
-The `evals` package checks orchestration hygiene such as frozen context, fresh
-sessions, disjoint scopes, relevant guides, checks, final integration, and the
-absence of persisted runtime artifacts. It does not certify product quality,
-market readiness, legal compliance, or the truth of a launch claim; the lead's
-task-specific harness and evidence gate do that.
+This repository ships prose contracts and has **no automated check**. An earlier
+`evals/` package and its GitHub Actions workflow were removed: the evaluator
+inspected orchestration events that only its own test suite produced, so it
+validated itself rather than the skill, and nothing outside this repository
+consumed its output.
 
-Run the evaluator suite from the repository root:
-
-```text
-python -B .agents/skills/saturation/evals/test_grader.py
-```
-
-The evaluator also accepts an in-memory observation snapshot through
-`evals/grader.py <file>` or stdin; `evals/README.md` documents the event schema.
-That snapshot is an evaluator input, not an artifact produced by `$saturation`.
+Nothing here validates a change to `SKILL.md`, the role contracts, the handoff
+contract, or the style guides. Editing them is a manual review responsibility,
+and the quality bar is enforced at run time by the gates in `SKILL.md` and the
+task-specific harness of each cycle.
 
 ## Repository layout
 
 ```text
 .agents/skills/saturation/
-├── SKILL.md                    # orchestration behavior
-├── agents/                     # role contracts and the shared handoff contract
-├── code_styleguides/           # reusable implementation rules
-└── evals/
-    ├── grader.py               # the single in-memory run evaluator and its CLI
-    ├── test_grader.py          # evaluator tests
-    └── README.md               # evaluator contract and event schema
+├── SKILL.md                    # orchestration behavior, role roster, lead duties
+├── agents/                     # eight role contracts and the handoff contract
+└── code_styleguides/           # reusable implementation rules
 .saturation/cycles/<cycle_id>/  # the only durable harness artifacts
 ```
 

@@ -23,13 +23,13 @@ Resolve a conflict at the highest level that names it:
 - **SHOULD** is the default choice. Deviate with a stated reason.
 - **MAY** is a permitted choice.
 
-Every MUST and SHOULD carries a rule ID of the form `<MODULE>-<TOPIC>`; cite it
-when you apply, deviate from, or report the rule. MAY carries no ID.
+Each MUST and SHOULD carries a rule ID of the form `<MODULE>-<TOPIC>`, so a rule
+can be named precisely when it is applied, discussed, or reported. No citation is
+required: state the rule's meaning, and use its ID only when the ID is shorter or
+clearer than restating the rule. MAY carries no ID.
 
 A numeric limit is a diagnostic signal, not a refactoring command. Cohesion,
-coupling, behavior, and the cost of the change decide the action. **MUST** record
-a deviation from a MUST with its rule ID, location, reason, and impact
-(`GEN-DEVIATION`).
+coupling, behavior, and the cost of the change decide the action.
 
 ## 1. Size
 
