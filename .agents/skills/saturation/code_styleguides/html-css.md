@@ -1,69 +1,36 @@
-# Google HTML/CSS Style Guide Summary
+# HTML and CSS Code Style Guide
 
-This document summarizes key rules and best practices from the Google HTML/CSS
-Style Guide.
+### HTML semantics — `HTML-SEMANTICS`
 
-## 1. General Rules
+- **MUST** use the element that matches the content's meaning; a `<p>` marks a
+  paragraph, not spacing.
 
--   **Protocol:** Use HTTPS for all embedded resources.
--   **Indentation:** Indent by 2 spaces. Do not use tabs.
--   **Capitalization:** Use only lowercase for all code (element names,
-    attributes, selectors, properties).
--   **Trailing Whitespace:** Remove all trailing whitespace.
--   **Encoding:** Use UTF-8 (without a BOM). Specify `<meta charset="utf-8">` in
-    HTML.
+### Media alternatives — `HTML-MEDIA`
 
-## 2. HTML Style Rules
+- **MUST** give every `<img>` an `alt` attribute: a description, or `alt=""`
+  for an image that is purely decorative.
+- **MUST** provide captions or a transcript for audio and video content.
 
--   **Document Type:** Use `<!doctype html>`.
--   **HTML Validity:** Use valid HTML.
--   **Semantics:** Use HTML elements according to their intended purpose (e.g.,
-    use `<p>` for paragraphs, not for spacing).
--   **Multimedia Fallback:** Provide `alt` text for images and
-    transcripts/captions for audio/video.
--   **Separation of Concerns:** Strictly separate structure (HTML), presentation
-    (CSS), and behavior (JavaScript). Link to CSS and JS from external files.
--   **`type` Attributes:** Omit `type` attributes for stylesheets (`<link>`) and
-    scripts (`<script>`).
+### Separation of concerns — `HTML-SEPARATION`
 
-## 3. HTML Formatting Rules
+- **MUST** keep structure in HTML, presentation in CSS, and behavior in
+  JavaScript; a stylesheet or a script lives in an external file that the
+  document links.
+- **MUST NOT** put presentation in a `style` attribute or behavior in an
+  inline event handler.
 
--   **General:** Use a new line for every block, list, or table element, and
-    indent its children.
--   **Quotation Marks:** Use double quotation marks (`""`) for attribute values.
+### Document and resources — `HTML-DOCUMENT`
 
-## 4. CSS Style Rules
+- **MUST** declare `<meta charset="utf-8">` in the head and serve the document
+  as UTF-8.
+- **MUST** load an embedded resource over HTTPS.
 
--   **CSS Validity:** Use valid CSS.
--   **Class Naming:** Use meaningful, generic names. Separate words with a
-    hyphen (`-`).
-    -   **Good:** `.video-player`, `.site-navigation`
-    -   **Bad:** `.vid`, `.red-text`
--   **ID Selectors:** Avoid using ID selectors for styling. Prefer class
-    selectors.
--   **Shorthand Properties:** Use shorthand properties where possible (e.g.,
-    `padding`, `font`).
--   **`0` and Units:** Omit units for `0` values (e.g., `margin: 0;`).
--   **Leading `0`s:** Always include leading `0`s for decimal values (e.g.,
-    `font-size: 0.8em;`).
--   **Hexadecimal Notation:** Use 3-character hex notation where possible (e.g.,
-    `#fff`).
--   **`!important`:** Avoid using `!important`.
+### Selectors — `CSS-SELECTORS`
 
-## 5. CSS Formatting Rules
+- **MUST NOT** use an ID selector for styling; style through a class.
+- **SHOULD** name a class for the component it describes, not for its
+  appearance.
 
--   **Declaration Order:** Alphabetize declarations within a rule.
--   **Indentation:** Indent all block content.
--   **Semicolons:** Use a semicolon after every declaration.
--   **Spacing:**
-    -   Use a space after a property name's colon (`font-weight: bold;`).
-    -   Use a space between the last selector and the opening brace (`.foo {`).
-    -   Start a new line for each selector and declaration.
--   **Rule Separation:** Separate rules with a new line.
--   **Quotation Marks:** Use single quotes (`''`) for attribute selectors and
-    property values (e.g., `[type='text']`).
+### Cascade — `CSS-CASCADE`
 
-**BE CONSISTENT.** When editing code, match the existing style.
-
-*Source:
-[Google HTML/CSS Style Guide](https://google.github.io/styleguide/htmlcssguide.html)*
+- **MUST NOT** use `!important`; correct the cascade or the selector instead.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import re
 import unittest
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import grader
 
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
+GUIDES_DIR = SKILL_DIR / "code_styleguides"
 CYCLE_ID = "cycle-001"
 CONTEXT_PATH = grader.cycle_context_path(CYCLE_ID)
 REPORT_PATH = grader.cycle_report_path(CYCLE_ID)
@@ -828,6 +830,70 @@ class RoutingTests(unittest.TestCase):
         self.assertFalse(grader.should_trip_circuit_breaker(2))
         self.assertTrue(grader.should_trip_circuit_breaker(3))
         self.assertTrue(grader.should_trip_circuit_breaker(4))
+
+
+RULE_ID_PATTERN = re.compile(r"`([A-Z]{2,6}-[A-Z0-9]+(?:-[A-Z0-9]+)*)`")
+
+# Line ceilings for the injected style-guide corpus. Every applicable guide is
+# sent whole to a subagent, so its size is a contract rather than a preference.
+GUIDE_LINE_CEILINGS = {
+    "general.md": 150,
+    "cpp.md": 160,
+    "csharp.md": 180,
+    "dart.md": 80,
+    "go.md": 45,
+    "html-css.md": 45,
+    "java.md": 180,
+    "javascript.md": 45,
+    "python.md": 45,
+    "ruby.md": 45,
+    "typescript.md": 180,
+}
+
+
+def _guide_lines(name: str) -> int:
+    """Return the line count of one style guide."""
+
+    text = (GUIDES_DIR / name).read_text(encoding="utf-8")
+
+    return len(text.splitlines())
+
+
+class StyleGuideCorpusTest(unittest.TestCase):
+    """Keep the style-guide corpus small and single-sourced.
+
+    These tests live in this file because CI runs it. The grader's measured
+    contract stays free of token budgets; corpus size is enforced here instead.
+    """
+
+    def test_every_guide_is_registered_with_a_ceiling(self) -> None:
+        present = {path.name for path in GUIDES_DIR.glob("*.md")}
+
+        self.assertEqual(present, set(GUIDE_LINE_CEILINGS))
+
+    def test_no_guide_exceeds_its_line_ceiling(self) -> None:
+        oversized = [
+            f"{name}: {_guide_lines(name)} lines > {ceiling}"
+            for name, ceiling in sorted(GUIDE_LINE_CEILINGS.items())
+            if _guide_lines(name) > ceiling
+        ]
+
+        self.assertEqual(oversized, [])
+
+    def test_rule_ids_are_unique_across_guides(self) -> None:
+        owners: dict[str, set[str]] = {}
+        for name in sorted(GUIDE_LINE_CEILINGS):
+            text = (GUIDES_DIR / name).read_text(encoding="utf-8")
+            for rule_id in RULE_ID_PATTERN.findall(text):
+                owners.setdefault(rule_id, set()).add(name)
+
+        shared = {
+            rule_id: sorted(names)
+            for rule_id, names in owners.items()
+            if len(names) > 1
+        }
+
+        self.assertEqual(shared, {})
 
 
 if __name__ == "__main__":
