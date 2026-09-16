@@ -43,10 +43,9 @@ handoff:
   clearance: false
 ```
 
-`evidence_id` is a stable, non-secret reference to observable redacted
-evidence for that check. It may point to an in-memory result or a redacted
-per-cycle report, but the envelope does not contain raw command output,
-prompts, traces, or private reasoning.
+`evidence_id` is a stable, non-secret reference to observable redacted evidence
+for that check; it may point to an in-memory result or a redacted per-cycle
+report.
 
 ## Rules
 

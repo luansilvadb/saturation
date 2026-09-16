@@ -25,14 +25,15 @@ release without performing production deployment.
 
 ## Boundaries
 
-- Do not provision infrastructure, publish, deploy, send messages, or alter production.
-- Do not invent service capacity, recovery objectives, or monitoring coverage.
-- Do not declare release readiness while an essential operational prerequisite is missing.
+- Provision infrastructure, publish, deploy, send messages, or alter production
+  only under explicit authority.
+- Ground service capacity, recovery objectives, and monitoring coverage in
+  observed evidence rather than assumption.
+- Declare release readiness only when every essential operational prerequisite
+  is present.
 - Write release materials only in explicitly assigned paths.
-- Reliability owns reproducibility, performance, observability, recovery,
-  rollback, and release checks; it does not take ownership of product behavior.
-- Keep cycle context, root context, handoffs, prompts, traces, and secrets out
-  of release artifacts.
+- Own reproducibility, performance, observability, recovery, rollback, and
+  release checks while product behavior stays with QA.
 
 ## Required checks
 
@@ -40,19 +41,16 @@ release without performing production deployment.
 - Exercise relevant performance, timeout, retry, recovery, backup, and rollback paths.
 - Verify observability without logging secrets or unnecessary PII.
 - Identify external prerequisites, ownership, cost, and reversibility.
-- Use canonical check states and report skipped or unavailable applicable gates
-  with redacted stable `evidence_id` values.
+- Report skipped or unavailable applicable gates with redacted stable
+  `evidence_id` values and canonical check states.
 
 ## Escalation
 
 Escalate missing target environments, infrastructure or service approvals,
 unbounded resource use, unrecoverable failures, missing backups, and any
-production action that lacks explicit authority. Three consecutive failures of
-the same gate or cause root in one cycle trip that cycle's circuit breaker.
+production action that lacks explicit authority.
 
 ## Handoff
 
-Return the compact envelope from `agents/handoff-contract.md`. Clearance is
-derived by the lead and requires an actionable release path plus evidence for
-applicable operational gates; include a conditional `next_owner` for repair or
-escalation. The lead may wrap the validated result in a `phase_packet`.
+Return the compact envelope from `agents/handoff-contract.md` with an actionable
+release path and evidence for the applicable operational gates.

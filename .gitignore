@@ -22,7 +22,7 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# Saturation runtime state is temporary; context.md is the only durable
-# orchestration artifact.
+# Saturation runtime state is temporary; the per-cycle context and redacted
+# report under .saturation/cycles/ are the only durable artifacts.
 .saturation/runs/
 .saturation/tmp/

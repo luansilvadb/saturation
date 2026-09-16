@@ -7,11 +7,12 @@ and evidence of the result.
 
 ## Core contract
 
-When `/saturation` runs, it:
+When `$saturation` runs, it:
 
 1. receives the intent, scope, and non-goals from the user or `grilling`;
 2. conducts a separate technical-discovery conversation;
-3. records the consolidated contract in a frozen `.saturation/context.md`;
+3. records the consolidated contract in the frozen per-cycle
+   `.saturation/cycles/<cycle_id>/context.md`;
 4. delegates to the fixed v1 specialist team through deep, traceable,
    role-specific runtime briefs;
 5. implements complete in-scope behavior and does not optimize internal
@@ -29,9 +30,9 @@ irreversible actions, and production deployment require explicit approval.
 ## Context and team boundaries
 
 `grilling` refines what is being built. `saturation` refines how it will be
-delivered. The technical briefing is consolidated into the sole durable
-`.saturation/context.md`; prompts, role briefs, traces, and evaluation data
-remain ephemeral.
+delivered. The technical briefing is consolidated into the frozen per-cycle
+`.saturation/cycles/<cycle_id>/context.md`; prompts, role briefs, traces, and
+evaluation data remain ephemeral.
 
 The lead is the only user-facing agent. Specialists work in fresh sessions
 with disjoint write scopes, relevant style guides, and only the context and
@@ -58,34 +59,28 @@ absence of persisted runtime artifacts. It does not certify product quality,
 market readiness, legal compliance, or the truth of a launch claim; the lead's
 task-specific harness and evidence gate do that.
 
-Run the focused evaluator tests with:
+Run the evaluator suite from the repository root:
 
 ```text
 python -B .agents/skills/saturation/evals/test_grader.py
-python -B .agents/skills/saturation/evals/test_quality_comparison.py
-python -B .agents/skills/saturation/evals/test_quality_comparison_edges.py
-python -B .agents/skills/saturation/evals/test_quality_comparison_missing_branches.py
-python -B .agents/skills/saturation/evals/test_quality_comparison_numeric_edges.py
 ```
 
 The evaluator also accepts an in-memory observation snapshot through
-`evals/report.py --input <file>`. That file is an evaluator input, not an
-artifact produced by `/saturation`.
+`evals/grader.py <file>` or stdin; `evals/README.md` documents the event schema.
+That snapshot is an evaluator input, not an artifact produced by `$saturation`.
 
 ## Repository layout
 
 ```text
 .agents/skills/saturation/
 ├── SKILL.md                    # orchestration behavior
-├── agents/openai.yaml          # display metadata and default prompt
+├── agents/                     # role contracts and the shared handoff contract
 ├── code_styleguides/           # reusable implementation rules
 └── evals/
-    ├── grader.py               # in-memory run evaluator
-    ├── report.py               # evaluator CLI adapter
+    ├── grader.py               # the single in-memory run evaluator and its CLI
     ├── test_grader.py          # evaluator tests
-    ├── reasoning_scaffold.py   # optional internal routing aid
-    └── quality_comparison.py   # optional outcome comparison
-.saturation/context.md          # the only durable harness artifact
+    └── README.md               # evaluator contract and event schema
+.saturation/cycles/<cycle_id>/  # the only durable harness artifacts
 ```
 
 Prompts, traces, ledgers, hashes, coverage reports, and session history must

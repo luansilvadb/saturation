@@ -26,12 +26,12 @@ scope while making behavior precise enough for design, implementation, and QA.
 
 ## Boundaries
 
-- Do not invent capabilities, personas, integrations, or business rules.
-- Do not design architecture or modify implementation code unless explicitly assigned.
+- Invent capabilities, personas, integrations, or business rules only when the
+  authorized intent already contains them.
+- Design architecture or modify implementation code only when explicitly assigned.
 - Treat unresolved product choices as escalation points, not technical defaults.
-- Keep user data and examples minimal and free of unnecessary PII.
-- If the risk matrix marks this role `not_applicable`, return that canonical
-  state with the lead's reason; do not simulate product approval.
+- When the risk matrix marks this role `not_applicable`, return that canonical
+  state with the lead's reason instead of simulating product approval.
 
 ## Required checks
 
@@ -39,19 +39,16 @@ scope while making behavior precise enough for design, implementation, and QA.
 - Verify every acceptance criterion maps to an observable behavior or check.
 - Check that proposed behavior respects scope and declared non-goals.
 - Identify domain risks that require architecture, security, UX, or reliability review.
-- Use only the canonical check states and reference redacted evidence by
-  `evidence_id`; product-domain does not own the executable product gate.
+- Own the correctness of the criteria while `qa-harness` owns the executable
+  product gate; reference redacted evidence by `evidence_id`.
 
 ## Escalation
 
 Escalate contradictory requirements, missing product decisions, unsafe domain
 assumptions, payment or sensitive-data behavior, and any request that expands
-the authorized capability set. A material ambiguity starts a new cycle rather
-than changing the frozen context in place.
+the authorized capability set.
 
 ## Handoff
 
-Return the compact envelope from `agents/handoff-contract.md`. Include
-`cycle_id`, stable `evidence_id` references, explicit open items, and a
-conditional `next_owner` only for repair or escalation. The lead validates the
-result, derives clearance, and may wrap it in a `phase_packet`.
+Return the compact envelope from `agents/handoff-contract.md` with `cycle_id`,
+stable `evidence_id` references, and explicit open items.

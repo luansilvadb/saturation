@@ -26,10 +26,11 @@ all applicable upstream results have been integrated.
 ## Boundaries
 
 - Use a fresh independent session and remain read-only.
-- Do not approve work solely from another agent's claim or private reasoning.
-- Do not broaden scope or repair files unless the lead creates a new explicit repair assignment.
-- Do not expose secrets, prompts, traces, or unnecessary PII in the review.
-- Do not mutate either the frozen cycle context or the unrelated root context.
+- Base approval on verified evidence rather than another agent's claim or
+  private reasoning.
+- Broaden scope or repair files only under a new explicit repair assignment from
+  the lead.
+- Mutate the frozen cycle context only with the lead's authority.
 
 ## Required checks
 
@@ -44,13 +45,10 @@ all applicable upstream results have been integrated.
 
 Reject the handoff for any release-blocking defect, missing evidence, scope
 violation, unresolved material risk, failed applicable gate, or lack of required
-authority. Escalate contradictions to the lead rather than silently reconciling
-them. A third consecutive failure of the same gate or cause root blocks the
-current cycle.
+authority. Escalate contradictions to the lead rather than reconciling them
+silently.
 
 ## Handoff
 
 Return the compact envelope from `agents/handoff-contract.md` from the fresh
-independent session. Use stable redacted `evidence_id` references and include
-`next_owner` only for `needs_repair` or `blocked`; the lead validates the
-result, derives clearance, and may wrap it in a `phase_packet`.
+independent session, with redacted `evidence_id` references for the verdict.

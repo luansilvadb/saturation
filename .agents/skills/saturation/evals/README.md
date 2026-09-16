@@ -13,27 +13,27 @@ gate and never returns `launch-ready`.
 
 ## Contract measured
 
-The focused evaluator checks orchestration evidence only:
+`grader.py` is the single evaluator. It checks orchestration evidence only:
 
 - exactly one frozen context for the current cycle;
-- a complete objective activation matrix for the fixed nine-role roster;
+- a complete objective activation matrix for the fixed nine-role roster, with
+  `implementation`, `qa-harness`, and `final-reviewer` active in every mode;
 - delegated non-lead assignments bound to the current cycle, fresh initial
   sessions, and safe local repair session reuse;
 - disjoint write scopes;
 - applicable `code_styleguides`, or an explicit `not_applicable` style-guide
   status when the list is empty;
 - canonical check and integration statuses;
+- a compact canonical handoff with derived clearance, a conditional
+  `next_owner`, and no private fields;
 - a single fresh final-reviewer assignment after integration;
+- the three-failure circuit breaker;
 - optional stable evidence IDs and phase packets;
 - per-cycle context/report artifacts only; and
 - a successful final integration within the declared scopes.
 
-The `team_contract.py` evaluator additionally validates the fixed role library,
-the `full`/`hotfix`/`refactor` routing minimums, the compact canonical handoff,
-derived clearance, conditional `next_owner`, private-field rejection, and the
-three-failure circuit breaker. The lead is part of the fixed roster but is the
-main session: it has an `implicit` matrix row and no required assignment or
-specialist handoff.
+The lead is part of the fixed roster but is the main session: it has an
+`implicit` matrix row and no required assignment or specialist handoff.
 
 ## Per-cycle paths
 
@@ -49,8 +49,8 @@ An optional redacted report uses a sibling path such as:
 .saturation/cycles/<cycle_id>/report.json
 ```
 
-The legacy root `.saturation/context.md` and general `.saturation` runtime
-artifacts are not valid substitutes. The evaluator never writes these paths.
+General `.saturation` runtime artifacts are not valid substitutes. The
+evaluator never writes these paths.
 
 ## Activation matrix
 
@@ -94,8 +94,7 @@ observer.record(
 
 The matrix is a governance record, not a replacement for the role contracts.
 Conditional roles may be `not_applicable` only with a concise reason and
-stable evidence IDs. The minimum active roles for the selected mode still
-apply; the lead is implicit rather than active.
+stable evidence IDs. The lead is implicit rather than active.
 
 ## Observation hook
 
@@ -152,31 +151,13 @@ reasoning. Additive event kinds and fields remain ignored unless they use one
 of the explicitly validated contracts above. Breaking changes need an
 explicit version and tests.
 
-## Run the tests
-
-From the repository root:
-
-```text
-python -B .agents/skills/saturation/evals/test_grader.py
-python -B .agents/skills/saturation/evals/test_team_contract.py
-python -B .agents/skills/saturation/evals/test_quality_comparison.py
-python -B .agents/skills/saturation/evals/test_quality_comparison_edges.py
-python -B .agents/skills/saturation/evals/test_quality_comparison_missing_branches.py
-python -B .agents/skills/saturation/evals/test_quality_comparison_numeric_edges.py
-```
-
-The optional `quality_comparison.py` module evaluates explicitly versioned,
-paired outcomes for harness experiments. `reasoning_scaffold.py` provides a
-bounded internal routing aid. Neither module is part of the product runtime
-persistence or launch contract.
-
 ## CLI
 
 Evaluate a CI-owned JSON snapshot from a path or stdin:
 
 ```text
-python -B .agents/skills/saturation/evals/report.py observation.json
-type observation.json | python -B .agents/skills/saturation/evals/report.py --json
+python -B .agents/skills/saturation/evals/grader.py observation.json
+type observation.json | python -B .agents/skills/saturation/evals/grader.py --json
 ```
 
 The command prints the governance result and never writes a report. Its exit
@@ -184,7 +165,7 @@ code is a CI signal only.
 
 ## Boundary
 
-Do not add prompt contracts, PCP budgets, trace schemas, run directories,
-evidence ledgers, or persisted handoffs to this evaluator. If a future metric
+Keep this evaluator free of prompt contracts, token budgets, trace schemas,
+run directories, evidence ledgers, and persisted handoffs. If a future metric
 needs richer data, add a redacted in-memory event or an evaluator-owned
 experiment input without changing the normal saturation output.

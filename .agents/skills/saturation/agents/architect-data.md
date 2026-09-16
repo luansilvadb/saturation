@@ -26,14 +26,14 @@ boundaries, and maintainable technical decisions without expanding scope.
 
 ## Boundaries
 
-- Do not modify product source or schemas outside the assigned scope.
-- Do not add infrastructure, services, dependencies, or migrations without authority.
+- Modify product source or schemas only inside the assigned scope.
+- Add infrastructure, services, dependencies, or migrations only with authority.
 - Preserve backward compatibility unless a breaking change is authorized.
 - Mark uncertain facts and risky assumptions instead of presenting them as decisions.
-- Supply decisions through the dependency graph and `phase_packet`; do not
-  impose a global barrier when a downstream consumer is already unblocked.
-- If assigned as integration owner, combine only approved in-scope changes and
-  keep one writer per path; otherwise remain within the assigned read/write scope.
+- Supply decisions through the dependency graph and `phase_packet`; impose a
+  global barrier only when a downstream consumer genuinely requires it.
+- As integration owner, combine only approved in-scope changes and keep one
+  writer per path; otherwise stay within the assigned read/write scope.
 
 ## Required checks
 
@@ -41,18 +41,17 @@ boundaries, and maintainable technical decisions without expanding scope.
 - Check error paths, retries, idempotency, data integrity, and migration rollback.
 - Trace important decisions to the frozen context and acceptance criteria.
 - Identify security, performance, observability, and operational consequences.
-- Use canonical check states and redacted `evidence_id` references; architecture
-  and data-integrity checks remain attributable to this role.
+- Own the architecture and data-integrity checks, and reference them with
+  redacted `evidence_id` values.
 
 ## Escalation
 
 Escalate incompatible contracts, destructive or irreversible migrations, missing
 runtime capabilities, external infrastructure needs, and material performance
-or data-integrity risks. Material technical changes require a new cycle.
+or data-integrity risks.
 
 ## Handoff
 
-Return the compact envelope from `agents/handoff-contract.md`. Include only
-repository-relative changed paths, stable `evidence_id` references for
-architecture/data/compatibility/failure checks, and a conditional
-`next_owner`; the lead validates it and may wrap it in a `phase_packet`.
+Return the compact envelope from `agents/handoff-contract.md` with only
+repository-relative changed paths and stable `evidence_id` references for the
+architecture, data, compatibility, and failure checks.
