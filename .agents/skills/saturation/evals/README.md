@@ -1,9 +1,14 @@
 # Saturation evals
 
-The evaluator measures whether saturation produces a dependable implementation
-without making the normal runtime persist orchestration data. It consumes an
-in-memory observation snapshot and returns a result; any JSON file used by the
-CLI is an evaluator-owned input, never a file created by `/saturation`.
+The evaluator measures orchestration hygiene for saturation without making the
+normal runtime persist orchestration data. It consumes an in-memory observation
+snapshot and returns a result; any JSON file used by the CLI is an
+evaluator-owned input, never a file created by `/saturation`.
+
+This is not the product's launch gate. The saturation lead and the
+task-specific harness remain responsible for technical quality, target
+environment validation, security, privacy, licensing, maintainability,
+operations, and the truth of a `launch-ready` claim.
 
 ## What is measured
 
@@ -17,8 +22,11 @@ The focused evaluator checks only useful invariants:
 - only an approved final integration reaches the workspace;
 - no saturation runtime artifact is persisted.
 
-TDD, review, repair, verification, and coverage can be represented as `check`
-events. The evaluator does not force every task to use every action.
+TDD, review, repair, verification, coverage, and task-specific release checks
+can be represented as `check` events. The evaluator accepts `skip` or
+`not_applicable` for genuinely irrelevant actions, but a launch-ready runtime
+must not use a skipped or unavailable applicable gate as a substitute for
+repair or escalation.
 
 ## Observation hook
 
