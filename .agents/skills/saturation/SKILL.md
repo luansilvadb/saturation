@@ -5,7 +5,7 @@ description: "Orchestrate a risk-adaptive enterprise software delivery team of n
 
 # Saturation
 
-Use `/saturation` for an authorized implementation that must become a polished,
+Use `$saturation` for an authorized implementation that must become a polished,
 validated production candidate. Treat the main session as the lead of a large
 enterprise software development organization. Own the implementation method
 and the quality of the result while preserving the user's product intent,
