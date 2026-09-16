@@ -1,60 +1,56 @@
 # Saturation Context
 
-Status: FROZEN
-
 ## Objective
 
-Keep `/saturation` small and dependable: freeze the user's intent, delegate
-bounded work to clean subagents, apply the relevant code style guides, verify
-the implementation internally, and integrate only the final diff.
+Reduce redundant prose in the `Saturation Governance` part of the saturation
+skill while preserving its safety, scope, persistence, quality, and evaluation
+invariants.
 
 ## Scope
 
-- simplify the saturation skill and its internal prompt guidance;
-- keep fresh scoped subagents and useful quality actions;
-- move runtime observation and metrics to `evals`;
-- make delegated writes transactional and temporary;
-- simplify the evaluator and remove prompt/trace protocol baggage;
-- remove generated run artifacts from the repository.
+- Edit only the six `Saturation Governance` sections in
+  `.agents/skills/saturation/SKILL.md`:
+  `Persistence boundary`, `Context and trust`, `Scoped subagents`,
+  `Quality actions`, `Evaluation boundary`, and `Safety and escalation`.
+- Keep the behavior and intent of each retained invariant.
+- Keep `Lifecycle`, `Core promise`, `Final delivery`, `evals/`,
+  `code_styleguides/`, `README.md`, and `agents/openai.yaml` unchanged.
 
 ## Non-goals
 
-- removing TDD, review, repair, verification, or coverage as available actions;
-- removing ordinary product tests;
-- exposing internal session details to the user;
-- adding a new persistence layer for orchestration state;
-- changing unrelated skills or user work.
+- Do not remove fresh sessions, disjoint scopes, temporary workspaces, frozen
+  context, relevant checks, safety escalation, or the no-persistence boundary.
+- Do not change evaluator implementation, tests, graphify outputs, or unrelated
+  user changes.
+- Do not add prompt, trace, ledger, or evaluation artifacts.
 
 ## Acceptance criteria
 
-- `.saturation/context.md` is the only durable harness artifact in the project;
-- no normal `/saturation` run requires or creates prompts, traces, ledgers,
-  evidence files, hashes, or run directories;
-- subagents use fresh sessions, disjoint scopes, relevant style guides, and a
-  temporary workspace;
-- only an approved final diff reaches the primary workspace;
-- `evals` can observe internal events and own its metrics without coupling the
-  runtime to persisted trace schemas;
-- documentation and tests describe the simplified contract consistently.
+- The six sections are shorter and retain their agreed compact contracts.
+- The other skill sections and support files are unchanged.
+- Markdown remains clear and consistent with the local style guides.
+- `git diff --check` passes.
+- All 35 existing evaluator tests pass.
 
 ## Constraints
 
-- keep the evaluator dependency-free and deterministic;
-- preserve unrelated user changes;
-- do not use network access or external effects for validation;
-- do not persist prompt text, session history, or private reasoning;
-- use normal project test locations for tests that intentionally belong to the
-  product.
+- Preserve the existing modification in `graphify-out/cache/last_query_stamp`.
+- Use no network or external effects.
+- Apply only the approved final diff to the primary workspace.
+- Keep `.saturation/context.md` as the sole durable orchestration artifact.
 
 ## Decisions
 
-- orchestration state is ephemeral and a failed run restarts from this context;
-- `evals` observes and measures; `saturation` executes and integrates;
-- historical prompt/trace contracts are not active runtime requirements;
-- the final user-facing result is concise and focused on the delivered code.
+- `Evaluation boundary` keeps a short in-memory-only contract and points to
+  `evals/README.md` for details.
+- `Persistence boundary` becomes one concise paragraph.
+- `Scoped subagents`, `Quality actions`, `Context and trust`, and `Safety and
+  escalation` retain their essential guardrails in compact prose.
+- This pass does not regenerate `graphify-out`.
 
 ## References
 
 - `.agents/skills/saturation/SKILL.md`
+- `.agents/skills/saturation/code_styleguides/general.md`
 - `.agents/skills/saturation/code_styleguides/prompting.md`
 - `.agents/skills/saturation/evals/README.md`
