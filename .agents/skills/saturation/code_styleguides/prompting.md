@@ -10,9 +10,11 @@ Compose the smallest prompt that lets one actor complete one bounded piece of
 work safely and consistently. The prompt is an internal adapter between the
 frozen context and a clean subagent session, not a user-facing specification.
 
-Use the current `.saturation/context.md`, the assignment's paths, the complete
-relevant `code_styleguides`, and the checks needed for the assignment. Read
-source guides completely, then inject only rules that affect the work.
+Use the current `.saturation/cycles/<cycle_id>/context.md`, the assignment's
+paths, the complete relevant `code_styleguides`, and the checks needed for the
+assignment. Read source guides completely, then inject only rules that affect
+the work. Treat an unrelated root `.saturation/context.md` as read-only
+historical data, never as the current contract.
 
 ## Prompt shape
 
@@ -59,13 +61,14 @@ or omit a relevant check to make the result pass.
 ## Workspace and handoff
 
 Actors write in a temporary isolated workspace. A handoff is a compact
-in-memory result containing the status, changed paths, checks, and blocker if
-one exists. It does not need an event ID, prompt ID, evidence ID, trace entry,
+in-memory result containing the cycle and assignment IDs, canonical status,
+changed paths, checks with stable `evidence_id` references, and a blocker if
+one exists. It does not contain an event ID, prompt ID, trace entry, raw output,
 or JSON file unless the receiving API explicitly requires an in-memory object
 with those fields.
 
 Only the final approved diff is applied to the user's workspace. A failed or
-interrupted attempt is discarded and restarted from `.saturation/context.md`.
+interrupted attempt is discarded and restarted from the current cycle context.
 
 ## Failure behavior
 

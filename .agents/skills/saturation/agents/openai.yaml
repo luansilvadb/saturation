@@ -1,4 +1,4 @@
 interface:
   display_name: "Saturation"
   short_description: "Orchestrate a risk-adaptive specialist team"
-  default_prompt: "Use $saturation to orchestrate a risk-adaptive team of specialist subagents through discovery, implementation, validation, and an evidence-backed delivery."
+  default_prompt: "Use $saturation to orchestrate a risk-adaptive nine-role enterprise team through discovery, implementation, validation, and evidence-backed delivery."

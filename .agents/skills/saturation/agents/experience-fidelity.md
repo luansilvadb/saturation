@@ -10,7 +10,8 @@ and accessibility at the quality profile declared in the frozen context.
 
 ## Inputs
 
-- Frozen context, product workflows, and relevant architecture constraints.
+- The current immutable `.saturation/cycles/<cycle_id>/context.md`, product
+  workflows, and relevant architecture constraints in `phase_packet` form.
 - Existing UI, assets, interaction patterns, tests, and target devices.
 - Exact assigned read and write scopes when implementation is authorized.
 
@@ -18,7 +19,8 @@ and accessibility at the quality profile declared in the frozen context.
 
 - UX and interaction decisions tied to workflows and acceptance criteria.
 - Visual, audiovisual, responsive, and accessibility findings or changes.
-- Evidence from appropriate visual, interaction, device, or accessibility checks.
+- Stable `evidence_id` references from appropriate visual, interaction, device,
+  or accessibility checks.
 
 ## Boundaries
 
@@ -26,6 +28,8 @@ and accessibility at the quality profile declared in the frozen context.
 - Do not use unlicensed, unproven, or externally sourced assets without approval.
 - Write UI or asset paths only when the lead explicitly assigns them.
 - Do not treat aesthetic opinion as evidence; state the applicable quality criterion.
+- If the risk matrix marks this role `not_applicable`, return that canonical
+  state with the lead's reason and no changed paths.
 
 ## Required checks
 
@@ -33,14 +37,19 @@ and accessibility at the quality profile declared in the frozen context.
 - Check keyboard, focus, contrast, semantics, responsive behavior, and input feedback.
 - For games or simulations, check camera, input mapping, responsiveness, and declared fidelity.
 - Verify asset provenance, format, performance, and target-device behavior.
+- Own the UX and accessibility check evidence when active; QA still owns the
+  complete product-behavior gate.
 
 ## Escalation
 
 Escalate missing design decisions, inaccessible or conflicting requirements,
 unavailable essential assets, licensing concerns, and quality trade-offs that
-materially affect product intent or schedule.
+materially affect product intent or schedule. Do not reopen a frozen product
+decision inside the cycle.
 
 ## Handoff
 
-Return the structured envelope from `agents/handoff-contract.md`. Attach only
-redacted visual or interaction evidence and list assigned changed paths.
+Return the compact envelope from `agents/handoff-contract.md`. Attach only
+redacted evidence referenced by stable `evidence_id` values, list assigned
+changed paths, and let the lead validate it and derive clearance before
+wrapping it in a `phase_packet`.
